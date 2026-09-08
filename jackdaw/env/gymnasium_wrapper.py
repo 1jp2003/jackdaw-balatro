@@ -221,24 +221,24 @@ class BalatroGymnasiumEnv(gymnasium.Env):
         ante = gs.get("round_resets", {}).get("ante", 1)
         round_num = gs.get("round", 0)
         chips = gs.get("chips", 0)
-        ante_scale = ante / 8.0
+        
 
         # 1. Blind beaten: round increased → +0.15 * ante_scale
         if round_num > self._prev_round:
-            reward += 0.15 * ante_scale
+            reward += 0.15 
             # 2. Boss blind beaten (ante increased) → extra +0.1 * ante_scale
             if ante > self._prev_ante:
-                reward += 0.1 * ante_scale
+                reward += 0.1 
             # 3. Efficient clear: hands remaining bonus
             hands_left = gs.get("current_round", {}).get("hands_left", 0)
-            reward += 0.01 * hands_left
+            reward += 0.01 * hands_left 
 
         # 4. Score progress within a blind: chips gained toward target
         blind = gs.get("blind")
         blind_target = getattr(blind, "chips", 0) if blind is not None else 0
         if blind_target > 0 and chips > self._prev_chips:
             chip_delta = chips - self._prev_chips
-            reward += 0.02 * min(chip_delta / blind_target, 1.0)
+            reward += 0.02 * min(chip_delta / blind_target, 1.0) 
 
         # 5. Terminal
         if terminated or truncated:

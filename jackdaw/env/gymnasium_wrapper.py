@@ -207,38 +207,45 @@ class BalatroGymnasiumEnv(gymnasium.Env):
 
     def _compute_reward(self, info: dict[str, Any], terminated: bool, truncated: bool) -> float:
         """Compute step reward from game state deltas."""
+        gs: dict[str, Any] = info.get("raw_state", {})
+        ante = gs.get("round_resets", {}).get("ante", 1)
+        round_num = gs.get("round", 0)
+        chips = gs.get("chips", 0)
+
+        # Episode-max trackers must update every step regardless of reward
+        # mode — they feed step_info["balatro/ante_reached"]/"rounds_beaten"
+        # at terminal. Previously this lived only in the dense-shaping path
+        # below, so sparse mode (the default) always reported ante_reached=1
+        # and rounds_beaten=0 (known issue #7).
+        self._episode_max_ante = max(self._episode_max_ante, ante)
+        self._episode_max_round = max(self._episode_max_round, round_num)
+
         if not self._reward_shaping:
             if terminated or truncated:
                 return 1.0 if self._inner.episode_won else -1.0
             return 0.0
 
-        gs: dict[str, Any] = info.get("raw_state", {})
         phase = gs.get("phase")
 
         # Step cost — discourages stalling; doubled in shop phase
         reward = -0.002 if phase == "shop" else -0.001
 
-        ante = gs.get("round_resets", {}).get("ante", 1)
-        round_num = gs.get("round", 0)
-        chips = gs.get("chips", 0)
-        
-
         # 1. Blind beaten: round increased → +0.15 * ante_scale
         if round_num > self._prev_round:
-            reward += 0.15 
+            reward += 0.15
             # 2. Boss blind beaten (ante increased) → extra +0.1 * ante_scale
             if ante > self._prev_ante:
-                reward += 0.1 
+                reward += 0.1
             # 3. Efficient clear: hands remaining bonus
             hands_left = gs.get("current_round", {}).get("hands_left", 0)
-            reward += 0.01 * hands_left 
+            reward += 0.01 * hands_left
 
         # 4. Score progress within a blind: chips gained toward target
         blind = gs.get("blind")
         blind_target = getattr(blind, "chips", 0) if blind is not None else 0
         if blind_target > 0 and chips > self._prev_chips:
             chip_delta = chips - self._prev_chips
-            reward += 0.02 * min(chip_delta / blind_target, 1.0) 
+            reward += 0.02 * min(chip_delta / blind_target, 1.0)
 
         # 5. Terminal
         if terminated or truncated:
@@ -248,8 +255,6 @@ class BalatroGymnasiumEnv(gymnasium.Env):
         self._prev_round = round_num
         self._prev_ante = ante
         self._prev_chips = chips
-        self._episode_max_ante = max(self._episode_max_ante, ante)
-        self._episode_max_round = max(self._episode_max_round, round_num)
 
         return reward
 

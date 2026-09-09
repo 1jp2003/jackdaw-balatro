@@ -17,7 +17,8 @@ from pathlib import Path
 
 import numpy as np
 from sb3_contrib import MaskablePPO
-from stable_baselines3.common.callbacks import BaseCallback
+from stable_baselines3.common.callbacks import BaseCallback, CheckpointCallback
+from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 
 from jackdaw.env.game_interface import DirectAdapter
@@ -53,13 +54,19 @@ class BalatroMetricsCallback(BaseCallback):
         self._wins.clear()
 
 
-def make_env(seed: int = 0, max_steps: int = 10_000) -> BalatroGymnasiumEnv:
+def make_env(seed: int = 0, max_steps: int = 10_000, worker_id: int = 0) -> BalatroGymnasiumEnv:
+    # worker_id must be folded into seed_prefix, not just `seed` — with
+    # n_envs > 1, every worker shares the same `seed` (SB3 doesn't vary it
+    # per sub-env), so a bare f"PPO_{seed}" prefix makes every worker replay
+    # the identical seed sequence: batch diversity drops to 1 while cost
+    # stays N× and it fails silently (known issue #3).
     return BalatroGymnasiumEnv(
         adapter_factory=DirectAdapter,
         max_steps=max_steps,
-        seed_prefix=f"PPO_{seed}",
+        seed_prefix=f"PPO_{seed}_w{worker_id}",
         reward_shaping=True,
     )
+
 
 class EntCoefSchedule(BaseCallback):
     def __init__(self, initial: float, final: float, total_timesteps: int):
@@ -76,26 +83,42 @@ class EntCoefSchedule(BaseCallback):
     def _on_step(self) -> bool:
         return True
 
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Train MaskablePPO on Balatro")
     parser.add_argument("--total-timesteps", type=int, default=500_000)
     parser.add_argument("--log-dir", type=str, default="runs/balatro_ppo")
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--max-steps", type=int, default=2_000)
-    
+    parser.add_argument("--n-envs", type=int, default=1)
+    parser.add_argument(
+        "--checkpoint-freq",
+        type=int,
+        default=50_000,
+        help="Save a checkpoint every N env steps (0 disables). A prior run "
+        "crashed with NaN logits near 364k steps with no checkpointing, "
+        "losing the entire run — see CLAUDE.md Conventions.",
+    )
+
     args = parser.parse_args()
-    
+
     log_path = Path(args.log_dir)
     log_path.mkdir(parents=True, exist_ok=True)
 
-    env = make_env(seed=args.seed, max_steps=args.max_steps)
-    env = VecNormalize(DummyVecEnv(
-        [lambda: make_env(seed=args.seed, max_steps=args.max_steps)]),
-        norm_obs=False, 
-        norm_reward=True, 
-        gamma=0.99
+    # Monitor must wrap each sub-env directly: SB3's _wrap_env only inserts
+    # Monitor when the env isn't already a VecEnv, so wrapping after
+    # DummyVecEnv/VecNormalize silently drops rollout/ep_rew_mean and
+    # ep_len_mean (known issue #6).
+    def _make_worker_env(worker_id: int) -> Monitor:
+        return Monitor(make_env(seed=args.seed, max_steps=args.max_steps, worker_id=worker_id))
+
+    env = VecNormalize(
+        DummyVecEnv([lambda i=i: _make_worker_env(i) for i in range(args.n_envs)]),
+        norm_obs=False,
+        norm_reward=True,
+        gamma=0.99,
     )
-    
+
     model = MaskablePPO(
         "MultiInputPolicy",
         env,
@@ -111,7 +134,23 @@ def main() -> None:
         target_kl=0.02,
     )
     print(f"Training for {args.total_timesteps} timesteps...")
-    model.learn(total_timesteps=args.total_timesteps, callback=[BalatroMetricsCallback(), EntCoefSchedule(initial=0.005, final=0.001, total_timesteps=500_000)])
+    callbacks: list[BaseCallback] = [
+        BalatroMetricsCallback(),
+        EntCoefSchedule(initial=0.005, final=0.001, total_timesteps=500_000),
+    ]
+    if args.checkpoint_freq > 0:
+        # save_freq counts VecEnv.step() calls, not total env-steps, so it
+        # must be divided by n_envs to checkpoint every checkpoint_freq
+        # real env-steps regardless of how many workers are running.
+        callbacks.append(
+            CheckpointCallback(
+                save_freq=max(args.checkpoint_freq // args.n_envs, 1),
+                save_path=str(log_path / "checkpoints"),
+                name_prefix="balatro_ppo",
+                save_vecnormalize=True,
+            )
+        )
+    model.learn(total_timesteps=args.total_timesteps, callback=callbacks)
 
     save_path = log_path / "balatro_ppo"
     model.save(str(save_path))

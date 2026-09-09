@@ -35,13 +35,19 @@ def balatro_game_spec() -> GameSpec:
         EntityTypeSpec(
             name="hand_card",
             feature_dim=D_PLAYING_CARD,
-            max_count=8,
+            # Hand size exceeds 8 in normal play (Juggler, Turtle Bean,
+            # vouchers) — 8 silently truncated the observation while
+            # card_mask still marked the extra cards legal, so the agent
+            # could act on cards it never observed (known issue #5).
+            max_count=20,
             has_catalog_id=False,
         ),
         EntityTypeSpec(
             name="joker",
             feature_dim=D_JOKER,
-            max_count=5,
+            # Joker count exceeds 5 with Negative editions — same
+            # truncation issue as hand_card above.
+            max_count=10,
             has_catalog_id=True,
             catalog_size=NUM_CENTER_KEYS,
         ),

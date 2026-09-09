@@ -28,6 +28,7 @@ from jackdaw.env.consumable_targets import (
     get_valid_target_cards,
     validate_card_targets,
 )
+from jackdaw.env.eval_seeds import EVAL_SEEDS
 from jackdaw.env.game_interface import (
     BridgeAdapter,
     DirectAdapter,
@@ -40,6 +41,7 @@ from jackdaw.env.game_spec import (
     GameSpec,
 )
 from jackdaw.env.gymnasium_wrapper import BalatroGymnasiumEnv
+from jackdaw.env.heuristic_agent import HeuristicAgent
 from jackdaw.env.observation import (
     D_CONSUMABLE,
     D_GLOBAL,
@@ -50,6 +52,7 @@ from jackdaw.env.observation import (
     Observation,
     encode_observation,
 )
+from jackdaw.env.rollout import EpisodeResult, evaluate_agent, run_episode
 
 __all__ = [
     "ActionMask",
@@ -65,12 +68,15 @@ __all__ = [
     "D_PLAYING_CARD",
     "D_SHOP",
     "DirectAdapter",
+    "EVAL_SEEDS",
+    "EpisodeResult",
     "FactoredAction",
     "GameActionMask",
     "GameAdapter",
     "GameObservation",
     "GameSpec",
     "GameState",
+    "HeuristicAgent",
     "NUM_ACTION_TYPES",
     "NUM_CENTER_KEYS",
     "Observation",
@@ -78,10 +84,12 @@ __all__ = [
     "balatro_game_spec",
     "encode_observation",
     "engine_action_to_factored",
+    "evaluate_agent",
     "factored_to_engine_action",
     "get_action_mask",
     "get_consumable_target_info",
     "get_consumable_target_spec",
     "get_valid_target_cards",
+    "run_episode",
     "validate_card_targets",
 ]

@@ -166,3 +166,29 @@ class TestRandomEpisodes:
             mask = info["action_mask"]
             if terminated or truncated:
                 break
+
+
+# ------------------------------------------------------------------
+# Metrics (known issue #7: sparse mode never updated episode trackers)
+# ------------------------------------------------------------------
+
+
+class TestMetricsInSparseMode:
+    def test_trackers_update_without_reward_shaping(self, env: BalatroGymnasiumEnv) -> None:
+        """env fixture defaults reward_shaping=False (sparse). Previously
+        _compute_reward's early return in sparse mode skipped the tracker
+        updates entirely, so _episode_max_ante/_episode_max_round (and thus
+        the terminal balatro/ante_reached, rounds_beaten info) stayed
+        hardcoded at their reset values (1, 0) forever, regardless of actual
+        progress. Call _compute_reward directly with a fabricated raw_state
+        so this is deterministic, not dependent on a random episode reaching
+        ante 2+ within a bounded step budget."""
+        assert env._reward_shaping is False
+        env.reset(seed=0)
+
+        fake_info = {"raw_state": {"round_resets": {"ante": 3}, "round": 2, "chips": 0}}
+        reward = env._compute_reward(fake_info, terminated=False, truncated=False)
+
+        assert reward == 0.0  # sparse mode: 0 mid-episode regardless of progress
+        assert env._episode_max_ante == 3
+        assert env._episode_max_round == 2

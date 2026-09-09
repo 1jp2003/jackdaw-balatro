@@ -17,6 +17,7 @@ import pytest
 
 from jackdaw.env.action_space import ActionMask, ActionType, FactoredAction
 from jackdaw.env.balatro_env import BalatroEnvironment
+from jackdaw.env.balatro_spec import balatro_game_spec
 from jackdaw.env.game_interface import DirectAdapter
 from jackdaw.env.game_spec import GameActionMask, GameEnvironment, GameObservation
 from jackdaw.env.observation import Observation
@@ -140,6 +141,61 @@ class TestIntegration:
 
         assert env.episode_length == steps
         assert steps > 0
+
+
+class TestEntityMaxCounts:
+    """Known issue #5: hand_card/joker max_count were lower than real hand
+    size / joker count can reach, so observations silently truncated while
+    card_mask still marked the extra cards legal."""
+
+    def test_hand_card_and_joker_max_counts_raised(self) -> None:
+        # Exact values are a tunable estimate, not a contract — assert
+        # they're raised well past the original too-low defaults (8, 5)
+        # rather than pinning a specific number that legitimately shifts
+        # as the estimate gets refined.
+        spec = balatro_game_spec()
+        by_name = {et.name: et.max_count for et in spec.entity_types}
+        assert by_name["hand_card"] > 8
+        assert by_name["joker"] > 5
+
+
+class TestSeedPrefixIsolation:
+    """Known issue #3: SubprocVecEnv workers sharing one seed_prefix replay
+    the identical seed sequence (fails silently). Fixed by folding a
+    per-worker id into seed_prefix — see scripts/train_ppo.py::make_env."""
+
+    @staticmethod
+    def _first_hand_ranks_suits(seed_prefix: str) -> tuple[tuple[str, str], ...]:
+        # reset() leaves phase=BLIND_SELECT with no hand dealt yet — select
+        # the blind to deal the starting hand before comparing. Compare
+        # (rank, suit) rather than center_key: every unmodified playing
+        # card shares the same center_key ("c_base") regardless of which
+        # specific card it is, so center_key can't distinguish hands.
+        worker_env = BalatroEnvironment(
+            adapter_factory=DirectAdapter,
+            back_keys=["b_red"],
+            stakes=[1],
+            max_steps=10,
+            seed_prefix=seed_prefix,
+        )
+        worker_env.reset()
+        _, _, _, _, info = worker_env.step(FactoredAction(action_type=ActionType.SelectBlind))
+        hand = info["raw_state"].get("hand", [])
+        return tuple((c.base.rank, c.base.suit) for c in hand)
+
+    def test_same_prefix_collides(self) -> None:
+        """Reproduces the defect: identical seed_prefix on two fresh envs
+        (both at their default episode index 0) deals the identical hand."""
+        a = self._first_hand_ranks_suits("SAME_PREFIX")
+        b = self._first_hand_ranks_suits("SAME_PREFIX")
+        assert a == b
+
+    def test_distinct_prefix_diverges(self) -> None:
+        """The fix: distinct seed_prefix values (one per worker) produce
+        independent games."""
+        a = self._first_hand_ranks_suits("WORKER_0")
+        b = self._first_hand_ranks_suits("WORKER_1")
+        assert a != b
 
 
 # ---------------------------------------------------------------------------

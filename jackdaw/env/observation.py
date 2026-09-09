@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import json
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -57,6 +57,19 @@ NUM_CENTER_KEYS: int = len(_CENTER_KEY_TO_ID)  # ~299
 def center_key_id(key: str) -> int:
     """Map a center_key to its integer ID (0 for unknown)."""
     return _CENTER_KEY_TO_ID.get(key, 0)
+
+
+def encode_catalog_ids(cards: list[Card]) -> np.ndarray:
+    """Raw integer catalog IDs for a list of cards, shape ``(len(cards),)`` int32.
+
+    Per docs/RL_PLAN.md Sec 5.1: joker/consumable/shop_item identity is a
+    *token*, not a quantity — this is the un-normalized companion to the
+    ``center_key_id`` float baked into column 0 of ``encode_joker``/
+    ``encode_consumable``/``encode_shop_item``'s output, meant for an
+    ``nn.Embedding`` lookup rather than recovered by decoding that float
+    (lossy/fragile — the plan is explicit on this point).
+    """
+    return np.array([center_key_id(c.center_key) for c in cards], dtype=np.int32)
 
 
 # ---------------------------------------------------------------------------
@@ -946,6 +959,7 @@ _EMPTY_PLAYING = np.zeros((0, D_PLAYING_CARD), dtype=np.float32)
 _EMPTY_JOKER = np.zeros((0, D_JOKER), dtype=np.float32)
 _EMPTY_CONSUMABLE = np.zeros((0, D_CONSUMABLE), dtype=np.float32)
 _EMPTY_SHOP = np.zeros((0, D_SHOP), dtype=np.float32)
+_EMPTY_IDS = np.zeros((0,), dtype=np.int32)
 
 
 def _get_hand_buf(n: int) -> np.ndarray:
@@ -1087,6 +1101,13 @@ class Observation:
 
     Each entity array has shape ``(N, D)`` where N varies per timestep.
     Empty areas produce shape ``(0, D)`` arrays.  All arrays are float32.
+
+    ``joker_ids``/``consumable_ids``/``shop_ids`` are the raw integer
+    catalog-ID companions to column 0 of ``jokers``/``consumables``/
+    ``shop_cards`` (docs/RL_PLAN.md Sec 5.1) — for the three entity types
+    with ``has_catalog_id=True`` in ``balatro_game_spec()``. Not emitted
+    for ``hand_cards``/``pack_cards`` (playing cards aren't catalog
+    entities).
     """
 
     global_context: np.ndarray  # (D_GLOBAL,)
@@ -1095,6 +1116,9 @@ class Observation:
     consumables: np.ndarray  # (N_cons, D_CONSUMABLE)
     shop_cards: np.ndarray  # (N_shop, D_SHOP)
     pack_cards: np.ndarray  # (N_pack, D_PLAYING_CARD)
+    joker_ids: np.ndarray = field(default_factory=lambda: _EMPTY_IDS)  # (N_joker,) int32
+    consumable_ids: np.ndarray = field(default_factory=lambda: _EMPTY_IDS)  # (N_cons,) int32
+    shop_ids: np.ndarray = field(default_factory=lambda: _EMPTY_IDS)  # (N_shop,) int32
 
     def to_game_observation(self) -> GameObservation:
         """Convert to a game-agnostic :class:`GameObservation`."""
@@ -1106,6 +1130,11 @@ class Observation:
                 "consumable": self.consumables,
                 "shop_item": self.shop_cards,
                 "pack_card": self.pack_cards,
+            },
+            entity_ids={
+                "joker": self.joker_ids,
+                "consumable": self.consumable_ids,
+                "shop_item": self.shop_ids,
             },
         )
 
@@ -1145,13 +1174,16 @@ def encode_observation(gs: dict[str, Any]) -> Observation:
 
     # Jokers — batch encode
     joker_arr = encode_jokers_batch(jokers, gs)
+    joker_ids = encode_catalog_ids(jokers) if jokers else _EMPTY_IDS
 
     # Consumables (small count, keep per-card)
     consumables: list[Card] = gs.get("consumables", [])
     if consumables:
         cons_arr = np.stack([encode_consumable(c, gs) for c in consumables])
+        consumable_ids = encode_catalog_ids(consumables)
     else:
         cons_arr = _EMPTY_CONSUMABLE
+        consumable_ids = _EMPTY_IDS
 
     # Shop cards (combine shop_cards + shop_vouchers + shop_boosters)
     shop_items: list[Card] = (
@@ -1159,8 +1191,10 @@ def encode_observation(gs: dict[str, Any]) -> Observation:
     )
     if shop_items:
         shop_arr = np.stack([encode_shop_item(c, gs) for c in shop_items])
+        shop_ids = encode_catalog_ids(shop_items)
     else:
         shop_arr = _EMPTY_SHOP
+        shop_ids = _EMPTY_IDS
 
     # Pack cards — batch encode
     pack_cards: list[Card] = gs.get("pack_cards", [])
@@ -1173,4 +1207,7 @@ def encode_observation(gs: dict[str, Any]) -> Observation:
         consumables=cons_arr,
         shop_cards=shop_arr,
         pack_cards=pack_arr,
+        joker_ids=joker_ids,
+        consumable_ids=consumable_ids,
+        shop_ids=shop_ids,
     )

@@ -13,8 +13,9 @@ against real Balatro.
 
 To intentionally update the fixture after a real observation.py change,
 regenerate it with the same snapshot logic used here (reset -> DirectAdapter,
-optionally SelectBlind, encode_observation, round to 6dp) and review the
-diff like any other code change.
+optionally SelectBlind, encode_observation, round float fields to 6dp,
+catalog-ID fields kept as exact ints) and review the diff like any other
+code change.
 """
 
 from __future__ import annotations
@@ -45,7 +46,7 @@ _GOLDEN = _load_golden()
 
 
 def _assert_matches(obs: Observation, expected: dict[str, list], scenario: str) -> None:
-    fields = {
+    float_fields = {
         "global_context": obs.global_context,
         "hand_cards": obs.hand_cards,
         "jokers": obs.jokers,
@@ -53,7 +54,7 @@ def _assert_matches(obs: Observation, expected: dict[str, list], scenario: str) 
         "shop_cards": obs.shop_cards,
         "pack_cards": obs.pack_cards,
     }
-    for name, actual in fields.items():
+    for name, actual in float_fields.items():
         expected_arr = np.array(expected[name], dtype=np.float32)
         # An empty golden array is stored as [] (no known column count);
         # reshape to match actual's column count so shape comparison and
@@ -66,6 +67,22 @@ def _assert_matches(obs: Observation, expected: dict[str, list], scenario: str) 
         )
         assert np.allclose(actual, expected_arr, atol=1e-5), (
             f"{scenario}.{name}: values drifted from tests/fixtures/observation_golden.json"
+        )
+
+    # Catalog-ID channels (docs/RL_PLAN.md Sec 5.1) — exact integer match,
+    # no tolerance.
+    id_fields = {
+        "joker_ids": obs.joker_ids,
+        "consumable_ids": obs.consumable_ids,
+        "shop_ids": obs.shop_ids,
+    }
+    for name, actual in id_fields.items():
+        expected_ids = np.array(expected[name], dtype=np.int32)
+        assert actual.shape == expected_ids.shape, (
+            f"{scenario}.{name}: shape {actual.shape} != golden {expected_ids.shape}"
+        )
+        assert np.array_equal(actual, expected_ids), (
+            f"{scenario}.{name}: drifted from tests/fixtures/observation_golden.json"
         )
 
 

@@ -15,6 +15,7 @@ Example::
 
 from __future__ import annotations
 
+import zlib
 from collections.abc import Callable
 from itertools import combinations
 from typing import Any
@@ -32,10 +33,28 @@ from jackdaw.env.game_spec import FactoredAction, GameActionMask, GameObservatio
 MAX_ACTIONS: int = 500
 CARD_COMBO_BUDGET: int = 200
 
+
+def _stable_int_seed(text: str) -> int:
+    """Deterministic non-negative int derived from a string.
+
+    NOT Python's builtin ``hash()`` — that's randomized per-process by
+    default (``PYTHONHASHSEED``), which would silently make anything seeded
+    from it non-reproducible across runs/processes. ``zlib.crc32`` is
+    deterministic and stable across platforms and Python versions.
+    """
+    return zlib.crc32(text.encode())
+
+
 # Pre-compute entity layout from spec
 _SPEC = balatro_game_spec()
 _ENTITY_INFO: list[tuple[str, int, int]] = [
     (et.name, et.max_count, et.feature_dim) for et in _SPEC.entity_types
+]
+# Catalog-ID entity types only (joker/consumable/shop_item) — the
+# embedding-lookup channels from docs/RL_PLAN.md Sec 5.1, keyed as
+# f"{name}_ids" in the observation Dict, shape (max_count,) int.
+_CATALOG_ENTITY_INFO: list[tuple[str, int, int]] = [
+    (et.name, et.max_count, et.catalog_size) for et in _SPEC.entity_types if et.has_catalog_id
 ]
 # Action types that take no targets at all
 _SIMPLE_TYPES: frozenset[int] = frozenset(
@@ -96,6 +115,15 @@ class BalatroGymnasiumEnv(gymnasium.Env):
 
     metadata: dict[str, Any] = {"render_modes": []}
 
+    # Known issue #15: a deterministic policy can get stuck spamming a
+    # zero-cost action (observed: SwapHandLeft, 1992/2000 steps on one eval
+    # seed) that never changes chips/round/ante/hands/discards/dollars.
+    # Detected generically via _progress_fingerprint rather than by
+    # excluding specific "cosmetic" action types, so it also catches a
+    # policy alternating between two different non-progressing actions.
+    _STALL_STEPS_LIMIT: int = 20
+    _STALL_PENALTY: float = -1.0
+
     def __init__(
         self,
         adapter_factory: Callable[[], GameAdapter],
@@ -133,6 +161,19 @@ class BalatroGymnasiumEnv(gymnasium.Env):
             shape=(len(_ENTITY_INFO),),
             dtype=np.float32,
         )
+        # Catalog-ID channels (docs/RL_PLAN.md Sec 5.1) — 0 is reserved for
+        # unknown/padding, valid IDs run 1..catalog_size inclusive, so the
+        # per-slot range is [0, catalog_size]. Box, not MultiDiscrete: SB3's
+        # preprocess_obs one-hot-encodes MultiDiscrete/Discrete spaces
+        # before a features extractor ever sees them (300-way one-hot per
+        # slot here), which is exactly the dense representation embeddings
+        # exist to avoid. Box passes through as a plain float tensor holding
+        # the integer value, which BalatroExtractor casts back with .long()
+        # for the nn.Embedding lookup.
+        for name, max_count, catalog_size in _CATALOG_ENTITY_INFO:
+            obs_spaces[f"{name}_ids"] = spaces.Box(
+                low=0, high=catalog_size, shape=(max_count,), dtype=np.int64
+            )
         self.observation_space = spaces.Dict(obs_spaces)
 
         # Action space
@@ -146,6 +187,27 @@ class BalatroGymnasiumEnv(gymnasium.Env):
         self._prev_chips: int = 0
         self._episode_max_ante: int = 1
         self._episode_max_round: int = 0
+        self._stall_fingerprint: tuple[Any, ...] | None = None
+        self._stall_steps: int = 0
+
+    @staticmethod
+    def _progress_fingerprint(gs: dict[str, Any]) -> tuple[Any, ...]:
+        """The subset of game state that constitutes real progress.
+
+        Anything NOT in this tuple (hand/joker order, which shop items are
+        highlighted, etc.) is free to change without resetting the stall
+        counter — only actions that spend a resource or move the score
+        count as progress.
+        """
+        cr = gs.get("current_round", {})
+        return (
+            gs.get("chips", 0),
+            gs.get("round", 0),
+            gs.get("round_resets", {}).get("ante", 1),
+            cr.get("hands_left", 0),
+            cr.get("discards_left", 0),
+            gs.get("dollars", 0),
+        )
 
     # ------------------------------------------------------------------
     # Gymnasium API
@@ -158,11 +220,29 @@ class BalatroGymnasiumEnv(gymnasium.Env):
         options: dict[str, Any] | None = None,
     ) -> tuple[dict[str, np.ndarray], dict[str, Any]]:
         super().reset(seed=seed)
-        if seed is not None:
-            self._rng = np.random.default_rng(seed)
 
+        # Gymnasium's `seed` param is typed int-only, but the underlying
+        # Balatro game seed is a string (frozen eval sets, oracle seeds,
+        # etc. are named strings like "EVAL_003"). `options["game_seed"]`
+        # is the Gymnasium-idiomatic way to pass that through without
+        # abusing `seed`'s type — it takes priority over `seed` when both
+        # are given.
+        #
+        # Whichever seed is used must ALSO reseed the action-table
+        # subsampling RNG (self._rng, consumed by _enumerate_actions when
+        # legal actions exceed MAX_ACTIONS) — a game_seed-only reset that
+        # left self._rng on OS entropy would silently make evaluation on a
+        # "frozen" seed non-reproducible across runs whenever subsampling
+        # kicks in, defeating the entire point of a string game_seed for
+        # eval. Derive a stable int from the string (not Python's hash(),
+        # which is itself randomized per-process by default).
+        game_seed = (options or {}).get("game_seed")
         kwargs: dict[str, Any] = {}
-        if seed is not None:
+        if game_seed is not None:
+            self._rng = np.random.default_rng(_stable_int_seed(str(game_seed)))
+            kwargs["seed"] = str(game_seed)
+        elif seed is not None:
+            self._rng = np.random.default_rng(seed)
             kwargs["seed"] = str(seed)
 
         game_obs, game_mask, info = self._inner.reset(**kwargs)
@@ -171,6 +251,8 @@ class BalatroGymnasiumEnv(gymnasium.Env):
         self._prev_chips = 0
         self._episode_max_ante = 1
         self._episode_max_round = 0
+        self._stall_fingerprint = self._progress_fingerprint(info.get("raw_state", {}))
+        self._stall_steps = 0
         self._action_table = self._enumerate_actions(game_mask, info)
         obs = self._build_obs(game_obs)
         return obs, {"action_mask": self.action_masks()}
@@ -179,7 +261,25 @@ class BalatroGymnasiumEnv(gymnasium.Env):
         factored = self._action_table[action]
         game_obs, terminated, truncated, game_mask, info = self._inner.step(factored)
 
+        # Known issue #15: force-truncate a policy that's spending steps
+        # without changing any real game resource, before the reward is
+        # computed — so the forced truncation still gets the normal
+        # terminal-loss reward from _compute_reward (dense mode's -0.2/-0.5
+        # bonus and sparse mode's -1.0), on top of which _STALL_PENALTY is
+        # added below to distinguish "lost by stalling" from "lost normally".
+        fingerprint = self._progress_fingerprint(info.get("raw_state", {}))
+        if fingerprint == self._stall_fingerprint:
+            self._stall_steps += 1
+        else:
+            self._stall_steps = 0
+            self._stall_fingerprint = fingerprint
+        stalled = self._stall_steps >= self._STALL_STEPS_LIMIT
+        if stalled and not (terminated or truncated):
+            truncated = True
+
         reward = self._compute_reward(info, terminated, truncated)
+        if stalled:
+            reward += self._STALL_PENALTY
 
         # Rebuild action table for next step
         if not (terminated or truncated):
@@ -274,6 +374,17 @@ class BalatroGymnasiumEnv(gymnasium.Env):
                 counts.append(0)
             obs[name] = padded
         obs["entity_counts"] = np.array(counts, dtype=np.float32)
+
+        # Catalog-ID channels — 0 (unknown/padding) fills slots beyond the
+        # real entity count, same convention center_key_id() already uses.
+        for name, max_count, _catalog_size in _CATALOG_ENTITY_INFO:
+            ids = game_obs.entity_ids.get(name)
+            padded_ids = np.zeros((max_count,), dtype=np.int64)
+            if ids is not None and ids.shape[0] > 0:
+                n = min(ids.shape[0], max_count)
+                padded_ids[:n] = ids[:n]
+            obs[f"{name}_ids"] = padded_ids
+
         return obs
 
     def _enumerate_actions(

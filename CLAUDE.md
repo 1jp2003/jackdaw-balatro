@@ -94,11 +94,58 @@ code cross-platform.
 
 MaskablePPO on `MultiInputPolicy`, Red Deck / White Stake.
 
-- Best: **mean ante ~1.08, ~1.9 blinds beaten, win rate 0**
-- The agent dies inside ante 1 — it cannot clear a 300-chip small blind by
-  sampling hands
-- Two runs (3, 4) crashed near 360k steps with NaN logits
-- Throughput: ~417 steps/sec single-env CPU
+- **Scripted heuristic baseline (exact one-step lookahead): mean ante 2.75,
+  win rate 0%** — `HeuristicAgent`, `uv run scripts/eval_agent.py --agent
+  heuristic --episodes 200`. This is the number PPO has to beat.
+- **PPO run 5 (500k steps, first run post Phase-0 fixes): mean ante 1.26,
+  win rate 0%** — first *real* eval-seed number (`scripts/eval_ppo.py`,
+  `results/ppo_run5.json`); runs 1-4's "~1.08" was a rollout statistic, not
+  an eval-seed one, and sparse-mode metrics were broken anyway (known issue
+  #7). **Does not beat the heuristic.**
+- Run 5 completed all 500k steps with **no NaN crash**, unlike runs 3/4 —
+  plausibly the Phase 0 fixes, not confirmed (one run, not an ablation).
+- **Phase 1's highest-value fix (joker/consumable/shop identity embeddings)
+  is implemented**: `BalatroExtractor` (`jackdaw/env/feature_extractor.py`),
+  `--extractor balatro` (default) in `train_ppo.py`.
+  **Run 6 (first attempt, pooled all 5 entity types) regressed**: mean ante
+  1.00 (vs run 5's 1.26) despite healthy training curves (`explained_variance`
+  0.59, no crash) — pooling `hand_card` destroyed per-card identity
+  `PlayHand`/`Discard` need. **Fixed**: pooling now only applies to
+  joker/consumable/shop_item; hand_card/pack_card are flattened
+  (position-preserving). Regression test added. **Runs 7 and 8 (the fix,
+  two seeds): mean ante 1.26 and 1.13** — both in the same 1.1-1.3 band as
+  run 5's default-extractor 1.265. The run-to-run spread *within* the fixed
+  extractor (0.13) is as large as the gap to run 5, so at 500k steps the
+  two architectures are statistically indistinguishable — **confirmed not
+  broken (unlike run 6), but no detectable benefit yet either.**
+- **Run 9 (attempted 1M-step run) crashed at step 409,600 — the NaN-in-logits
+  failure from runs 3/4 came back**, with `share_features_extractor=False`
+  in place and *without* the gradual `explained_variance`/`value_loss`
+  precursor pattern that flagged runs 3/4 in advance — a flat, healthy
+  training signal right up to a sudden crash. Turned out not to be a clean
+  step-count test: `learning_rate`/`clip_range` are scheduled on *fraction
+  of declared* `--total-timesteps`, so run 9's effective LR was >3× run 7's
+  at the same step count (a longer declared horizon decays slower) —
+  plausibly the actual trigger, echoing runs 3/4's original
+  reward-scale/critic-blowup mechanism rather than proving the new
+  architecture itself is unstable. Also found and fixed while
+  investigating: `EntCoefSchedule` was hardcoded to `total_timesteps=500_000`
+  regardless of the CLI flag, and `CheckpointCallback` wrote to a flat
+  `checkpoints/` folder shared across every run using the same `--log-dir`
+  (silently collision-prone — now a timestamped subfolder per invocation).
+  Checkpointing itself worked as intended: only ~10k steps were lost, not
+  360k+. **Any future long run should be read as also having a different
+  LR/clip_range trajectory, not a clean extension, until that's addressed.**
+  Full diagnosis in `docs/RL_PLAN.md` §3 "Run 6" through "Run 9".
+- 25% of run 5's eval episodes used to stall at ante 1 for the full
+  2,000-step budget, spamming a no-op action (`SwapHandLeft`) instead of
+  playing — **known issue #15, fixed**: a generic stall detector in
+  `BalatroGymnasiumEnv` now force-truncates + penalizes N steps without
+  chip/round/ante/hand/discard/dollar progress. Validated against the
+  existing Run 5 checkpoint with no retraining: mean length 520.9 → 30.0,
+  eval throughput 1.6 → 26.1 eps/sec, mean ante unchanged (1.26).
+- Throughput: ~417-540 steps/sec single-env CPU (varies by hand/joker size
+  now that entity max_counts are raised, issue #5).
 - **Hyperparameter tuning is exhausted.** Runs 3 and 4 had very different policy
   dynamics and near-identical task performance. The bottleneck is the
   observation encoding and the action space.
@@ -110,14 +157,19 @@ MaskablePPO on `MultiInputPolicy`, Red Deck / White Stake.
 Ordered by impact. Full detail with file:line in `docs/RL_PLAN.md` §4.
 
 1. **`center_key` encoded as a normalized float** (`observation.py:420`) —
-   destroys joker identity. Needs `nn.Embedding` + integer ID channels.
-   *Highest-value fix.*
+   destroys joker identity. *Highest-value fix* — **fixed**: raw integer IDs
+   now also emitted (`observation.py::encode_catalog_ids`,
+   `obs["{name}_ids"]`) and consumed by `jackdaw/env/feature_extractor.py::
+   BalatroExtractor` (`nn.Embedding` + masked-mean pooling per entity
+   type). Wire with `--extractor balatro` (default) in `train_ppo.py`. Not
+   yet run at full 500k-step scale against the Run 5 baseline.
 2. **`_enumerate_actions` randomly subsamples** when legal actions > 500
    (`gymnasium_wrapper.py:331`) — legal actions vanish nondeterministically.
 3. **`seed_prefix` collides across parallel workers** (`balatro_env.py`) — all
    `SubprocVecEnv` workers play identical games. Fails silently.
 4. **Shared features extractor** — a value-function blowup corrupts the policy.
-   Set `share_features_extractor=False`.
+   **Fixed**: `share_features_extractor=False` bundled into the
+   `--extractor balatro` wiring above (train_ppo.py).
 5. **Entity `max_count` too low** (`balatro_spec.py`: hand 8, jokers 5) — the
    agent can act on cards it never observed.
 6. **`Monitor` lost when passing `VecNormalize`** — kills `ep_rew_mean` /
@@ -126,6 +178,15 @@ Ordered by impact. Full detail with file:line in `docs/RL_PLAN.md` §4.
    updates.
 8. **Stale reference to `action_heads`** in `balatro_spec.py`. No such module
    exists; there is no policy/encoder module in `jackdaw/env/`.
+14. **`BalatroGymnasiumEnv._rng` unseeded on a `game_seed`-only reset —
+    fixed.** Made eval on a "frozen" seed non-reproducible whenever
+    action-table subsampling triggered. Doesn't affect the heuristic/random
+    baselines (they use the factored `BalatroEnvironment` interface, never
+    this RNG).
+15. **Deterministic policy stalls on no-op action loops — fixed.**
+    25% of run 5's eval episodes used to hit `max_steps=2000` stuck at
+    ante 1, spamming `SwapHandLeft`. Generic no-progress stall detector
+    in `BalatroGymnasiumEnv` now force-truncates + penalizes.
 
 ---
 
@@ -158,6 +219,13 @@ Ordered by impact. Full detail with file:line in `docs/RL_PLAN.md` §4.
 - `_log_scale` is sign-symmetric and safe for negative dollars — not a NaN
   source.
 - `max_steps=10_000` never binds; episodes are ~20 steps.
+- **`spaces.MultiDiscrete`/`Discrete` get one-hot encoded by SB3 before a
+  features extractor ever sees them** (`preprocess_obs`) — a raw-integer
+  channel meant for `nn.Embedding` (e.g. `joker_ids`) must be `spaces.Box`
+  instead, or it silently arrives as a huge one-hot tensor. A `forward()`
+  unit test that hand-builds tensors won't catch this — it bypasses
+  `preprocess_obs` entirely. Validate any new features-extractor input with
+  a real `model.learn()` call.
 
 ---
 

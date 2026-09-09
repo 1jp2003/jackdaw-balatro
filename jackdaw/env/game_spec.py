@@ -7,7 +7,7 @@ the generic policy network, encoder, and training loop.  Also provides
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol, runtime_checkable
 
 import numpy as np
@@ -145,10 +145,16 @@ class GameObservation:
         Maps entity type name to a variable-length feature array,
         ``entity_name -> (N_i, D_i)``.  Empty entity types should
         have shape ``(0, D_i)``.
+    entity_ids:
+        Maps entity type name to a variable-length integer catalog-ID
+        array, ``entity_name -> (N_i,)``, for entity types with
+        ``has_catalog_id=True`` only (see ``EntityTypeSpec``). Absent or
+        empty for entity types without a catalog ID.
     """
 
     global_context: np.ndarray  # (D_global,)
     entities: dict[str, np.ndarray]  # entity_name -> (N_i, D_i)
+    entity_ids: dict[str, np.ndarray] = field(default_factory=dict)  # entity_name -> (N_i,)
 
 
 @dataclass

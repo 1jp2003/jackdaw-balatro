@@ -182,6 +182,61 @@ class TestJokerEncoding:
 
 
 # ---------------------------------------------------------------------------
+# Catalog IDs (docs/RL_PLAN.md Sec 5.1 — embedding-lookup channels)
+# ---------------------------------------------------------------------------
+
+
+class TestCatalogIds:
+    def test_joker_ids_match_center_key_id(self):
+        from jackdaw.engine.card import Card
+        from jackdaw.env.observation import center_key_id
+
+        adapter = _make_adapter()
+        gs = adapter.raw_state
+
+        joker = Card()
+        joker.set_ability("j_joker")
+        gs["jokers"] = [joker]
+
+        obs = encode_observation(gs)
+        assert obs.joker_ids.shape == (1,)
+        assert obs.joker_ids.dtype == np.int32
+        assert obs.joker_ids[0] == center_key_id(joker.center_key)
+        assert obs.joker_ids[0] > 0
+
+        # The raw ID must not just be a rescaled copy of the normalized
+        # float already in column 0 — that's exactly the lossy recovery
+        # docs/RL_PLAN.md Sec 5.1 says not to rely on.
+        assert obs.joker_ids[0] == round(obs.jokers[0, 0] * NUM_CENTER_KEYS)
+
+    def test_ids_length_matches_feature_array_length(self):
+        adapter = _make_adapter()
+        gs = adapter.raw_state
+        obs = encode_observation(gs)
+        assert obs.joker_ids.shape[0] == obs.jokers.shape[0]
+        assert obs.consumable_ids.shape[0] == obs.consumables.shape[0]
+        assert obs.shop_ids.shape[0] == obs.shop_cards.shape[0]
+
+    def test_empty_ids_shape_and_dtype(self):
+        adapter = _make_adapter()
+        gs = adapter.raw_state
+        gs["jokers"] = []
+        obs = encode_observation(gs)
+        assert obs.joker_ids.shape == (0,)
+        assert obs.joker_ids.dtype == np.int32
+
+    def test_entity_ids_flow_through_to_game_observation(self):
+        adapter = _make_adapter()
+        gs = adapter.raw_state
+        obs = encode_observation(gs)
+        game_obs = obs.to_game_observation()
+        assert set(game_obs.entity_ids.keys()) == {"joker", "consumable", "shop_item"}
+        np.testing.assert_array_equal(game_obs.entity_ids["joker"], obs.joker_ids)
+        np.testing.assert_array_equal(game_obs.entity_ids["consumable"], obs.consumable_ids)
+        np.testing.assert_array_equal(game_obs.entity_ids["shop_item"], obs.shop_ids)
+
+
+# ---------------------------------------------------------------------------
 # Face-down cards (boss blind)
 # ---------------------------------------------------------------------------
 

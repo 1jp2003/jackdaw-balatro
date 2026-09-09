@@ -241,7 +241,10 @@
     "jokers": [],
     "consumables": [],
     "shop_cards": [],
-    "pack_cards": []
+    "pack_cards": [],
+    "joker_ids": [],
+    "consumable_ids": [],
+    "shop_ids": []
   },
   "at_selecting_hand": {
     "global_context": [
@@ -622,6 +625,9 @@
     "jokers": [],
     "consumables": [],
     "shop_cards": [],
-    "pack_cards": []
+    "pack_cards": [],
+    "joker_ids": [],
+    "consumable_ids": [],
+    "shop_ids": []
   }
 }

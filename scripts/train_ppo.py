@@ -13,6 +13,7 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import time
 from pathlib import Path
 
 import numpy as np
@@ -99,6 +100,17 @@ def main() -> None:
         "crashed with NaN logits near 364k steps with no checkpointing, "
         "losing the entire run — see CLAUDE.md Conventions.",
     )
+    parser.add_argument(
+        "--extractor",
+        choices=["balatro", "default"],
+        default="balatro",
+        help="'balatro' (default): BalatroExtractor — per-entity-type "
+        "embeddings + masked-mean pooling (docs/RL_PLAN.md Sec 5.1/5.2), "
+        "with share_features_extractor=False (known issue #4). 'default': "
+        "SB3's flatten+concat CombinedExtractor, for an isolated "
+        "architecture-only ablation against a run with everything else "
+        "identical.",
+    )
 
     args = parser.parse_args()
 
@@ -119,6 +131,16 @@ def main() -> None:
         gamma=0.99,
     )
 
+    policy_kwargs: dict = {}
+    if args.extractor == "balatro":
+        from jackdaw.env.feature_extractor import BalatroExtractor
+
+        policy_kwargs["features_extractor_class"] = BalatroExtractor
+        policy_kwargs["features_extractor_kwargs"] = {"features_dim": 256}
+        # known issue #4: the default shared extractor let a critic
+        # value-function blowup corrupt the policy through shared weights.
+        policy_kwargs["share_features_extractor"] = False
+
     model = MaskablePPO(
         "MultiInputPolicy",
         env,
@@ -132,20 +154,31 @@ def main() -> None:
         clip_range=0.15,
         clip_range_vf=0.2,
         target_kl=0.02,
+        policy_kwargs=policy_kwargs,
     )
     print(f"Training for {args.total_timesteps} timesteps...")
     callbacks: list[BaseCallback] = [
         BalatroMetricsCallback(),
-        EntCoefSchedule(initial=0.005, final=0.001, total_timesteps=500_000),
+        EntCoefSchedule(initial=0.005, final=0.001, total_timesteps=args.total_timesteps),
     ]
     if args.checkpoint_freq > 0:
         # save_freq counts VecEnv.step() calls, not total env-steps, so it
         # must be divided by n_envs to checkpoint every checkpoint_freq
         # real env-steps regardless of how many workers are running.
+        #
+        # The checkpoint dir must be unique per invocation, not a flat
+        # sibling of log_path shared by every run that uses the default
+        # --log-dir: two separate `train_ppo.py` runs reaching the same
+        # step count would otherwise write the identical filename
+        # (balatro_ppo_<N>_steps.zip) and silently clobber each other's
+        # crash-recovery checkpoint. A run that crashes only benefits from
+        # checkpointing if a *later* run can't have overwritten its
+        # recovery point first.
+        checkpoint_dir = log_path / "checkpoints" / time.strftime("%Y%m%d_%H%M%S")
         callbacks.append(
             CheckpointCallback(
                 save_freq=max(args.checkpoint_freq // args.n_envs, 1),
-                save_path=str(log_path / "checkpoints"),
+                save_path=str(checkpoint_dir),
                 name_prefix="balatro_ppo",
                 save_vecnormalize=True,
             )

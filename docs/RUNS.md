@@ -943,3 +943,62 @@ died on the same float32 tolerance failure this session root-caused. Fixed.
 Worth noting the shape of the mistake: the diagnostic that proved the bug was
 itself vulnerable to it, and only a checkpoint that happened to sit near the
 tolerance exposed the gap.
+
+
+---
+
+## Where the remaining wall-clock goes (post-parallelism)
+
+With 8 workers the picture inverts — the env is no longer the bottleneck:
+
+```
+wall clock per step      2.06 ms
+env work per step        3.24 ms  -> /8 workers = 0.40 ms of critical path
+main-process remainder   1.66 ms  (80% of critical path)
+```
+
+Which is also why 6 -> 8 workers bought only 13%. More workers now buy very
+little; the serial main process gates everything.
+
+**Torch thread contention: hypothesis tested, rejected.** 8 workers plus
+torch's default 6 intra-op threads on a 6C/12T box looks like textbook
+oversubscription, so clamping torch should help. Measured at `--n-envs 8`,
+120k steps each:
+
+| `OMP_NUM_THREADS` | fps |
+|---|---|
+| 1 | 451 |
+| 2 | 493 |
+| 4 | **524** |
+| 6 (torch default) | 506 |
+
+Clamping to 1 costs **11%**. The network is not thread-starved and the
+default is already near-optimal; 4 threads is the peak and buys 3.5%.
+Exposed as `--torch-threads` (default: leave torch alone) since the optimum
+is machine-specific, but do not expect much from it.
+
+**On moving to a GPU.** Not worth it for this workload, and the parallel
+numbers do not change that despite the main process now dominating:
+
+- The threading result shows the network is not compute-bound — throwing
+  more parallelism at it barely moves throughput, so a faster device will not
+  either.
+- The model is tiny (256-dim features, small MLPs), and rollout inference
+  runs at **batch 8**. Kernel-launch and host-device transfer overhead at
+  that size routinely exceeds the compute, so a GPU can be *slower* for the
+  rollout half.
+- Of the 1.66 ms main-process budget, ~1.06 ms is the features extractor
+  (`scripts/bench_step.py`); the rest is SB3 buffer bookkeeping,
+  `VecNormalize` and IPC deserialization — none of which a GPU touches.
+
+Linux is still mildly preferable (`fork` instead of Windows `spawn` for
+worker startup, generally cheaper IPC), but that is a constant factor on
+setup, not a multiplier on training.
+
+**The real remaining lever is `MAX_ACTIONS`.** It is 500 while the action
+table peaks at 52 (median 40). That inflates the policy head 8x, every mask
+allocation, and every softmax — all of it in the serial main process — and it
+is the same width that puts the float32 softmax at the `Simplex()` tolerance
+in the first place. Shrinking it to ~64 attacks throughput and that
+numerical fragility together. It changes the action space, so it invalidates
+existing checkpoints and needs its own baseline pair.

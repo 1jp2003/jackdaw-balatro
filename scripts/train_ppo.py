@@ -433,6 +433,18 @@ def main() -> None:
         "identical.",
     )
     parser.add_argument(
+        "--torch-threads",
+        type=int,
+        default=None,
+        help="Intra-op thread count for torch (default: torch's own choice, "
+        "one per physical core). With --vec-env subproc the workers and the "
+        "main process share cores, so this looks like it should be lowered — "
+        "measured on a 6C/12T box at --n-envs 8 it should NOT be: 1 thread "
+        "gives 451 fps, 2 gives 493, 6 (default) gives 506, and 4 gives 524. "
+        "The network is not thread-starved and clamping it costs throughput. "
+        "The optimum is machine-specific; re-measure before setting it.",
+    )
+    parser.add_argument(
         "--lookahead",
         action="store_true",
         help="Add the lookahead observation channel (docs/RL_PLAN.md §5.3 "
@@ -467,6 +479,10 @@ def main() -> None:
     args = parser.parse_args()
 
     disable_distribution_validation()
+
+    if args.torch_threads is not None:
+        torch.set_num_threads(args.torch_threads)
+    print(f"torch intra-op threads: {torch.get_num_threads()}")
 
     log_path = Path(args.log_dir)
     log_path.mkdir(parents=True, exist_ok=True)

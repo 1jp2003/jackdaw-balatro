@@ -219,3 +219,14 @@ runs.md
 rl_plan.md
 ppo*.json
 *.json
+
+# Test fixtures are inputs to the suite, not run artifacts — the blanket
+# *.json above silently excluded hand_eval_refactor_golden.json, which made
+# tests/engine/test_hand_eval_refactor_golden.py fail on a fresh clone while
+# passing locally. Negate the directory so future fixtures aren't dropped.
+!tests/fixtures/**/*.json
+
+# Local `jackdaw validate` transcripts (see scripts/validate_ab.py).
+/before.txt
+/after.txt
+validate_*.txt

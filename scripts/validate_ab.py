@@ -10,10 +10,12 @@ noise and per-scenario detail. This compares the *sets of failing scenarios*.
 Workflow (engine change on `jackdaw/engine/hand_eval.py` as the example)::
 
     git stash push jackdaw/engine/hand_eval.py
-    jackdaw validate > before.txt 2>&1
+    jackdaw validate > validate_before.txt 2>&1
     git stash pop
-    jackdaw validate > after.txt 2>&1
-    uv run scripts/validate_ab.py before.txt after.txt
+    jackdaw validate > validate_after.txt 2>&1
+    uv run scripts/validate_ab.py validate_before.txt validate_after.txt
+
+(``validate_*.txt`` is gitignored so transcripts don't end up committed.)
 
 An empty "newly failing" set exonerates the change: whatever is red was red
 already, and belongs to the upstream fork rather than to you.

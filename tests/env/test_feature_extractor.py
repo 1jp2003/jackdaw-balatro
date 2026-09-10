@@ -114,6 +114,102 @@ class TestBalatroExtractor:
 
         assert not torch.allclose(out_original, out_swapped)
 
+    def test_embed_init_std_is_honored(self, env: BalatroGymnasiumEnv) -> None:
+        """embed_init_std must actually control the init scale. Run 10 showed
+        shrinking it does NOT help (mean ante 1.07 vs 1.26 — see the module
+        docstring), so the default is back to 1.0, but the knob has to keep
+        working for further study."""
+        from jackdaw.env.feature_extractor import BalatroExtractor
+
+        small = BalatroExtractor(env.observation_space, features_dim=32, embed_init_std=0.1)
+        default = BalatroExtractor(env.observation_space, features_dim=32)
+        for name in ("joker", "consumable", "shop_item"):
+            small_std = small.embeddings[name].weight.detach()[1:].std().item()
+            default_std = default.embeddings[name].weight.detach()[1:].std().item()
+            assert small_std < 0.25, f"{name}: embed_init_std=0.1 not applied"
+            assert default_std > 0.5, f"{name}: default init should stay ~N(0,1)"
+
+    def test_padding_row_stays_zero_after_reinit(self, env: BalatroGymnasiumEnv) -> None:
+        """nn.init.normal_ overwrites padding_idx too — if it isn't re-zeroed,
+        padding slots stop being neutral and empty joker/consumable/shop
+        slots start injecting signal."""
+        from jackdaw.env.feature_extractor import BalatroExtractor
+
+        extractor = BalatroExtractor(env.observation_space, features_dim=32)
+        for name in ("joker", "consumable", "shop_item"):
+            padding_row = extractor.embeddings[name].weight.detach()[0]
+            assert torch.all(padding_row == 0.0), f"{name} padding row is not zero"
+
+    def test_lookahead_channel_is_consumed_when_present(self) -> None:
+        """The extractor must actually read obs["lookahead"] (docs/RL_PLAN.md
+        §5.3 Level 2) — an unread channel would train silently and look like
+        "the feature didn't help" rather than "the feature wasn't wired"."""
+        from jackdaw.env.feature_extractor import BalatroExtractor
+        from jackdaw.env.gymnasium_wrapper import LOOKAHEAD_DIM
+
+        env = BalatroGymnasiumEnv(
+            adapter_factory=DirectAdapter, max_steps=200, lookahead_features=True
+        )
+        obs, info = env.reset(seed=7)
+        legal = int(np.nonzero(info["action_mask"])[0][0])
+        obs, *_ = env.step(legal)  # into SELECTING_HAND, menu scored
+
+        extractor = BalatroExtractor(env.observation_space, features_dim=32)
+        assert extractor._lookahead_dim == LOOKAHEAD_DIM
+
+        baseline = extractor(_obs_batch_to_tensors(obs, batch_size=1))
+        perturbed = {k: v.copy() for k, v in obs.items()}
+        perturbed["lookahead"] = perturbed["lookahead"] + 1.0
+        assert not torch.allclose(
+            baseline, extractor(_obs_batch_to_tensors(perturbed, batch_size=1))
+        )
+
+    def test_extractor_still_works_without_the_lookahead_channel(
+        self, env: BalatroGymnasiumEnv
+    ) -> None:
+        """Default envs (and every pre-run-13 checkpoint) have no such key."""
+        from jackdaw.env.feature_extractor import BalatroExtractor
+
+        obs, _ = env.reset(seed=0)
+        extractor = BalatroExtractor(env.observation_space, features_dim=32)
+        assert extractor._lookahead_dim == 0
+        out = extractor(_obs_batch_to_tensors(obs, batch_size=2))
+        assert out.shape == (2, 32)
+        assert torch.isfinite(out).all()
+
+    def test_learn_runs_end_to_end_with_lookahead(self) -> None:
+        """Exercise the real SB3 pipeline, not just forward().
+
+        A hand-built tensor batch bypasses preprocess_obs entirely — which is
+        how a MultiDiscrete-vs-Box bug once passed every extractor unit test
+        and still crashed the first real run (docs/RL_PLAN.md §5.1). Any new
+        observation channel has to be validated through model.learn().
+        """
+        pytest.importorskip("sb3_contrib")
+        from sb3_contrib import MaskablePPO
+
+        from jackdaw.env.feature_extractor import BalatroExtractor
+
+        def _make() -> BalatroGymnasiumEnv:
+            return BalatroGymnasiumEnv(
+                adapter_factory=DirectAdapter, max_steps=200, lookahead_features=True
+            )
+
+        model = MaskablePPO(
+            "MultiInputPolicy",
+            _make(),
+            n_steps=64,
+            batch_size=32,
+            verbose=0,
+            seed=0,
+            policy_kwargs={
+                "features_extractor_class": BalatroExtractor,
+                "features_extractor_kwargs": {"features_dim": 32},
+                "share_features_extractor": False,
+            },
+        )
+        model.learn(total_timesteps=128)
+
     def test_gradients_flow_to_embeddings(self, env: BalatroGymnasiumEnv) -> None:
         """The whole point of Sec 5.1/5.2 is that joker identity becomes
         learnable — confirm the embedding table actually receives

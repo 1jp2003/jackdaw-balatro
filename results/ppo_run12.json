@@ -1,0 +1,1411 @@
+{
+  "episodes": 200,
+  "mean_ante": 1.42,
+  "max_ante": 3,
+  "min_ante": 1,
+  "win_rate": 0.0,
+  "mean_length": 37.365,
+  "model": "runs/balatro_ppo/balatro_ppo",
+  "per_seed": [
+    {
+      "seed": "EVAL_000",
+      "ante_reached": 2,
+      "rounds_beaten": 6,
+      "won": false,
+      "length": 42
+    },
+    {
+      "seed": "EVAL_001",
+      "ante_reached": 1,
+      "rounds_beaten": 1,
+      "won": false,
+      "length": 7
+    },
+    {
+      "seed": "EVAL_002",
+      "ante_reached": 1,
+      "rounds_beaten": 2,
+      "won": false,
+      "length": 37
+    },
+    {
+      "seed": "EVAL_003",
+      "ante_reached": 1,
+      "rounds_beaten": 3,
+      "won": false,
+      "length": 46
+    },
+    {
+      "seed": "EVAL_004",
+      "ante_reached": 1,
+      "rounds_beaten": 2,
+      "won": false,
+      "length": 18
+    },
+    {
+      "seed": "EVAL_005",
+      "ante_reached": 1,
+      "rounds_beaten": 3,
+      "won": false,
+      "length": 33
+    },
+    {
+      "seed": "EVAL_006",
+      "ante_reached": 1,
+      "rounds_beaten": 1,
+      "won": false,
+      "length": 26
+    },
+    {
+      "seed": "EVAL_007",
+      "ante_reached": 1,
+      "rounds_beaten": 3,
+      "won": false,
+      "length": 46
+    },
+    {
+      "seed": "EVAL_008",
+      "ante_reached": 3,
+      "rounds_beaten": 7,
+      "won": false,
+      "length": 76
+    },
+    {
+      "seed": "EVAL_009",
+      "ante_reached": 1,
+      "rounds_beaten": 2,
+      "won": false,
+      "length": 18
+    },
+    {
+      "seed": "EVAL_010",
+      "ante_reached": 1,
+      "rounds_beaten": 3,
+      "won": false,
+      "length": 51
+    },
+    {
+      "seed": "EVAL_011",
+      "ante_reached": 1,
+      "rounds_beaten": 2,
+      "won": false,
+      "length": 19
+    },
+    {
+      "seed": "EVAL_012",
+      "ante_reached": 3,
+      "rounds_beaten": 7,
+      "won": false,
+      "length": 56
+    },
+    {
+      "seed": "EVAL_013",
+      "ante_reached": 1,
+      "rounds_beaten": 2,
+      "won": false,
+      "length": 19
+    },
+    {
+      "seed": "EVAL_014",
+      "ante_reached": 1,
+      "rounds_beaten": 2,
+      "won": false,
+      "length": 38
+    },
+    {
+      "seed": "EVAL_015",
+      "ante_reached": 1,
+      "rounds_beaten": 3,
+      "won": false,
+      "length": 47
+    },
+    {
+      "seed": "EVAL_016",
+      "ante_reached": 2,
+      "rounds_beaten": 4,
+      "won": false,
+      "length": 48
+    },
+    {
+      "seed": "EVAL_017",
+      "ante_reached": 1,
+      "rounds_beaten": 2,
+      "won": false,
+      "length": 37
+    },
+    {
+      "seed": "EVAL_018",
+      "ante_reached": 2,
+      "rounds_beaten": 6,
+      "won": false,
+      "length": 43
+    },
+    {
+      "seed": "EVAL_019",
+      "ante_reached": 1,
+      "rounds_beaten": 3,
+      "won": false,
+      "length": 30
+    },
+    {
+      "seed": "EVAL_020",
+      "ante_reached": 1,
+      "rounds_beaten": 2,
+      "won": false,
+      "length": 18
+    },
+    {
+      "seed": "EVAL_021",
+      "ante_reached": 1,
+      "rounds_beaten": 3,
+      "won": false,
+      "length": 39
+    },
+    {
+      "seed": "EVAL_022",
+      "ante_reached": 1,
+      "rounds_beaten": 2,
+      "won": false,
+      "length": 39
+    },
+    {
+      "seed": "EVAL_023",
+      "ante_reached": 2,
+      "rounds_beaten": 5,
+      "won": false,
+      "length": 59
+    },
+    {
+      "seed": "EVAL_024",
+      "ante_reached": 3,
+      "rounds_beaten": 8,
+      "won": false,
+      "length": 63
+    },
+    {
+      "seed": "EVAL_025",
+      "ante_reached": 1,
+      "rounds_beaten": 3,
+      "won": false,
+      "length": 48
+    },
+    {
+      "seed": "EVAL_026",
+      "ante_reached": 2,
+      "rounds_beaten": 6,
+      "won": false,
+      "length": 39
+    },
+    {
+      "seed": "EVAL_027",
+      "ante_reached": 1,
+      "rounds_beaten": 3,
+      "won": false,
+      "length": 29
+    },
+    {
+      "seed": "EVAL_028",
+      "ante_reached": 2,
+      "rounds_beaten": 5,
+      "won": false,
+      "length": 43
+    },
+    {
+      "seed": "EVAL_029",
+      "ante_reached": 2,
+      "rounds_beaten": 6,
+      "won": false,
+      "length": 82
+    },
+    {
+      "seed": "EVAL_030",
+      "ante_reached": 1,
+      "rounds_beaten": 1,
+      "won": false,
+      "length": 8
+    },
+    {
+      "seed": "EVAL_031",
+      "ante_reached": 1,
+      "rounds_beaten": 3,
+      "won": false,
+      "length": 46
+    },
+    {
+      "seed": "EVAL_032",
+      "ante_reached": 1,
+      "rounds_beaten": 2,
+      "won": false,
+      "length": 20
+    },
+    {
+      "seed": "EVAL_033",
+      "ante_reached": 2,
+      "rounds_beaten": 6,
+      "won": false,
+      "length": 47
+    },
+    {
+      "seed": "EVAL_034",
+      "ante_reached": 1,
+      "rounds_beaten": 1,
+      "won": false,
+      "length": 26
+    },
+    {
+      "seed": "EVAL_035",
+      "ante_reached": 1,
+      "rounds_beaten": 3,
+      "won": false,
+      "length": 34
+    },
+    {
+      "seed": "EVAL_036",
+      "ante_reached": 2,
+      "rounds_beaten": 4,
+      "won": false,
+      "length": 37
+    },
+    {
+      "seed": "EVAL_037",
+      "ante_reached": 2,
+      "rounds_beaten": 5,
+      "won": false,
+      "length": 43
+    },
+    {
+      "seed": "EVAL_038",
+      "ante_reached": 1,
+      "rounds_beaten": 2,
+      "won": false,
+      "length": 15
+    },
+    {
+      "seed": "EVAL_039",
+      "ante_reached": 2,
+      "rounds_beaten": 4,
+      "won": false,
+      "length": 39
+    },
+    {
+      "seed": "EVAL_040",
+      "ante_reached": 1,
+      "rounds_beaten": 2,
+      "won": false,
+      "length": 17
+    },
+    {
+      "seed": "EVAL_041",
+      "ante_reached": 1,
+      "rounds_beaten": 2,
+      "won": false,
+      "length": 38
+    },
+    {
+      "seed": "EVAL_042",
+      "ante_reached": 1,
+      "rounds_beaten": 3,
+      "won": false,
+      "length": 47
+    },
+    {
+      "seed": "EVAL_043",
+      "ante_reached": 1,
+      "rounds_beaten": 2,
+      "won": false,
+      "length": 38
+    },
+    {
+      "seed": "EVAL_044",
+      "ante_reached": 1,
+      "rounds_beaten": 3,
+      "won": false,
+      "length": 44
+    },
+    {
+      "seed": "EVAL_045",
+      "ante_reached": 2,
+      "rounds_beaten": 6,
+      "won": false,
+      "length": 47
+    },
+    {
+      "seed": "EVAL_046",
+      "ante_reached": 2,
+      "rounds_beaten": 4,
+      "won": false,
+      "length": 38
+    },
+    {
+      "seed": "EVAL_047",
+      "ante_reached": 2,
+      "rounds_beaten": 4,
+      "won": false,
+      "length": 31
+    },
+    {
+      "seed": "EVAL_048",
+      "ante_reached": 2,
+      "rounds_beaten": 6,
+      "won": false,
+      "length": 69
+    },
+    {
+      "seed": "EVAL_049",
+      "ante_reached": 1,
+      "rounds_beaten": 3,
+      "won": false,
+      "length": 27
+    },
+    {
+      "seed": "EVAL_050",
+      "ante_reached": 2,
+      "rounds_beaten": 4,
+      "won": false,
+      "length": 54
+    },
+    {
+      "seed": "EVAL_051",
+      "ante_reached": 1,
+      "rounds_beaten": 2,
+      "won": false,
+      "length": 21
+    },
+    {
+      "seed": "EVAL_052",
+      "ante_reached": 1,
+      "rounds_beaten": 1,
+      "won": false,
+      "length": 7
+    },
+    {
+      "seed": "EVAL_053",
+      "ante_reached": 2,
+      "rounds_beaten": 6,
+      "won": false,
+      "length": 47
+    },
+    {
+      "seed": "EVAL_054",
+      "ante_reached": 1,
+      "rounds_beaten": 2,
+      "won": false,
+      "length": 35
+    },
+    {
+      "seed": "EVAL_055",
+      "ante_reached": 3,
+      "rounds_beaten": 8,
+      "won": false,
+      "length": 85
+    },
+    {
+      "seed": "EVAL_056",
+      "ante_reached": 1,
+      "rounds_beaten": 3,
+      "won": false,
+      "length": 25
+    },
+    {
+      "seed": "EVAL_057",
+      "ante_reached": 1,
+      "rounds_beaten": 3,
+      "won": false,
+      "length": 30
+    },
+    {
+      "seed": "EVAL_058",
+      "ante_reached": 1,
+      "rounds_beaten": 2,
+      "won": false,
+      "length": 19
+    },
+    {
+      "seed": "EVAL_059",
+      "ante_reached": 1,
+      "rounds_beaten": 2,
+      "won": false,
+      "length": 21
+    },
+    {
+      "seed": "EVAL_060",
+      "ante_reached": 2,
+      "rounds_beaten": 4,
+      "won": false,
+      "length": 51
+    },
+    {
+      "seed": "EVAL_061",
+      "ante_reached": 2,
+      "rounds_beaten": 6,
+      "won": false,
+      "length": 62
+    },
+    {
+      "seed": "EVAL_062",
+      "ante_reached": 2,
+      "rounds_beaten": 5,
+      "won": false,
+      "length": 58
+    },
+    {
+      "seed": "EVAL_063",
+      "ante_reached": 2,
+      "rounds_beaten": 4,
+      "won": false,
+      "length": 58
+    },
+    {
+      "seed": "EVAL_064",
+      "ante_reached": 1,
+      "rounds_beaten": 3,
+      "won": false,
+      "length": 40
+    },
+    {
+      "seed": "EVAL_065",
+      "ante_reached": 1,
+      "rounds_beaten": 2,
+      "won": false,
+      "length": 23
+    },
+    {
+      "seed": "EVAL_066",
+      "ante_reached": 2,
+      "rounds_beaten": 4,
+      "won": false,
+      "length": 51
+    },
+    {
+      "seed": "EVAL_067",
+      "ante_reached": 1,
+      "rounds_beaten": 3,
+      "won": false,
+      "length": 31
+    },
+    {
+      "seed": "EVAL_068",
+      "ante_reached": 1,
+      "rounds_beaten": 2,
+      "won": false,
+      "length": 15
+    },
+    {
+      "seed": "EVAL_069",
+      "ante_reached": 1,
+      "rounds_beaten": 3,
+      "won": false,
+      "length": 35
+    },
+    {
+      "seed": "EVAL_070",
+      "ante_reached": 1,
+      "rounds_beaten": 1,
+      "won": false,
+      "length": 27
+    },
+    {
+      "seed": "EVAL_071",
+      "ante_reached": 2,
+      "rounds_beaten": 6,
+      "won": false,
+      "length": 58
+    },
+    {
+      "seed": "EVAL_072",
+      "ante_reached": 3,
+      "rounds_beaten": 8,
+      "won": false,
+      "length": 62
+    },
+    {
+      "seed": "EVAL_073",
+      "ante_reached": 1,
+      "rounds_beaten": 2,
+      "won": false,
+      "length": 19
+    },
+    {
+      "seed": "EVAL_074",
+      "ante_reached": 1,
+      "rounds_beaten": 1,
+      "won": false,
+      "length": 27
+    },
+    {
+      "seed": "EVAL_075",
+      "ante_reached": 2,
+      "rounds_beaten": 4,
+      "won": false,
+      "length": 40
+    },
+    {
+      "seed": "EVAL_076",
+      "ante_reached": 1,
+      "rounds_beaten": 2,
+      "won": false,
+      "length": 18
+    },
+    {
+      "seed": "EVAL_077",
+      "ante_reached": 1,
+      "rounds_beaten": 2,
+      "won": false,
+      "length": 37
+    },
+    {
+      "seed": "EVAL_078",
+      "ante_reached": 1,
+      "rounds_beaten": 2,
+      "won": false,
+      "length": 19
+    },
+    {
+      "seed": "EVAL_079",
+      "ante_reached": 1,
+      "rounds_beaten": 3,
+      "won": false,
+      "length": 20
+    },
+    {
+      "seed": "EVAL_080",
+      "ante_reached": 1,
+      "rounds_beaten": 3,
+      "won": false,
+      "length": 31
+    },
+    {
+      "seed": "EVAL_081",
+      "ante_reached": 1,
+      "rounds_beaten": 3,
+      "won": false,
+      "length": 27
+    },
+    {
+      "seed": "EVAL_082",
+      "ante_reached": 2,
+      "rounds_beaten": 4,
+      "won": false,
+      "length": 47
+    },
+    {
+      "seed": "EVAL_083",
+      "ante_reached": 1,
+      "rounds_beaten": 2,
+      "won": false,
+      "length": 17
+    },
+    {
+      "seed": "EVAL_084",
+      "ante_reached": 1,
+      "rounds_beaten": 2,
+      "won": false,
+      "length": 40
+    },
+    {
+      "seed": "EVAL_085",
+      "ante_reached": 2,
+      "rounds_beaten": 5,
+      "won": false,
+      "length": 57
+    },
+    {
+      "seed": "EVAL_086",
+      "ante_reached": 1,
+      "rounds_beaten": 3,
+      "won": false,
+      "length": 29
+    },
+    {
+      "seed": "EVAL_087",
+      "ante_reached": 1,
+      "rounds_beaten": 3,
+      "won": false,
+      "length": 41
+    },
+    {
+      "seed": "EVAL_088",
+      "ante_reached": 3,
+      "rounds_beaten": 7,
+      "won": false,
+      "length": 73
+    },
+    {
+      "seed": "EVAL_089",
+      "ante_reached": 1,
+      "rounds_beaten": 3,
+      "won": false,
+      "length": 27
+    },
+    {
+      "seed": "EVAL_090",
+      "ante_reached": 1,
+      "rounds_beaten": 3,
+      "won": false,
+      "length": 52
+    },
+    {
+      "seed": "EVAL_091",
+      "ante_reached": 3,
+      "rounds_beaten": 9,
+      "won": false,
+      "length": 68
+    },
+    {
+      "seed": "EVAL_092",
+      "ante_reached": 2,
+      "rounds_beaten": 5,
+      "won": false,
+      "length": 43
+    },
+    {
+      "seed": "EVAL_093",
+      "ante_reached": 3,
+      "rounds_beaten": 8,
+      "won": false,
+      "length": 84
+    },
+    {
+      "seed": "EVAL_094",
+      "ante_reached": 2,
+      "rounds_beaten": 6,
+      "won": false,
+      "length": 45
+    },
+    {
+      "seed": "EVAL_095",
+      "ante_reached": 1,
+      "rounds_beaten": 2,
+      "won": false,
+      "length": 37
+    },
+    {
+      "seed": "EVAL_096",
+      "ante_reached": 1,
+      "rounds_beaten": 1,
+      "won": false,
+      "length": 7
+    },
+    {
+      "seed": "EVAL_097",
+      "ante_reached": 1,
+      "rounds_beaten": 2,
+      "won": false,
+      "length": 31
+    },
+    {
+      "seed": "EVAL_098",
+      "ante_reached": 1,
+      "rounds_beaten": 3,
+      "won": false,
+      "length": 31
+    },
+    {
+      "seed": "EVAL_099",
+      "ante_reached": 2,
+      "rounds_beaten": 6,
+      "won": false,
+      "length": 48
+    },
+    {
+      "seed": "EVAL_100",
+      "ante_reached": 2,
+      "rounds_beaten": 6,
+      "won": false,
+      "length": 48
+    },
+    {
+      "seed": "EVAL_101",
+      "ante_reached": 2,
+      "rounds_beaten": 5,
+      "won": false,
+      "length": 38
+    },
+    {
+      "seed": "EVAL_102",
+      "ante_reached": 1,
+      "rounds_beaten": 2,
+      "won": false,
+      "length": 19
+    },
+    {
+      "seed": "EVAL_103",
+      "ante_reached": 1,
+      "rounds_beaten": 1,
+      "won": false,
+      "length": 26
+    },
+    {
+      "seed": "EVAL_104",
+      "ante_reached": 2,
+      "rounds_beaten": 6,
+      "won": false,
+      "length": 59
+    },
+    {
+      "seed": "EVAL_105",
+      "ante_reached": 1,
+      "rounds_beaten": 2,
+      "won": false,
+      "length": 41
+    },
+    {
+      "seed": "EVAL_106",
+      "ante_reached": 1,
+      "rounds_beaten": 2,
+      "won": false,
+      "length": 20
+    },
+    {
+      "seed": "EVAL_107",
+      "ante_reached": 2,
+      "rounds_beaten": 5,
+      "won": false,
+      "length": 41
+    },
+    {
+      "seed": "EVAL_108",
+      "ante_reached": 3,
+      "rounds_beaten": 8,
+      "won": false,
+      "length": 52
+    },
+    {
+      "seed": "EVAL_109",
+      "ante_reached": 1,
+      "rounds_beaten": 3,
+      "won": false,
+      "length": 33
+    },
+    {
+      "seed": "EVAL_110",
+      "ante_reached": 3,
+      "rounds_beaten": 8,
+      "won": false,
+      "length": 72
+    },
+    {
+      "seed": "EVAL_111",
+      "ante_reached": 2,
+      "rounds_beaten": 5,
+      "won": false,
+      "length": 38
+    },
+    {
+      "seed": "EVAL_112",
+      "ante_reached": 1,
+      "rounds_beaten": 2,
+      "won": false,
+      "length": 34
+    },
+    {
+      "seed": "EVAL_113",
+      "ante_reached": 2,
+      "rounds_beaten": 5,
+      "won": false,
+      "length": 65
+    },
+    {
+      "seed": "EVAL_114",
+      "ante_reached": 1,
+      "rounds_beaten": 2,
+      "won": false,
+      "length": 38
+    },
+    {
+      "seed": "EVAL_115",
+      "ante_reached": 3,
+      "rounds_beaten": 9,
+      "won": false,
+      "length": 69
+    },
+    {
+      "seed": "EVAL_116",
+      "ante_reached": 1,
+      "rounds_beaten": 2,
+      "won": false,
+      "length": 40
+    },
+    {
+      "seed": "EVAL_117",
+      "ante_reached": 2,
+      "rounds_beaten": 5,
+      "won": false,
+      "length": 64
+    },
+    {
+      "seed": "EVAL_118",
+      "ante_reached": 1,
+      "rounds_beaten": 3,
+      "won": false,
+      "length": 24
+    },
+    {
+      "seed": "EVAL_119",
+      "ante_reached": 1,
+      "rounds_beaten": 2,
+      "won": false,
+      "length": 15
+    },
+    {
+      "seed": "EVAL_120",
+      "ante_reached": 2,
+      "rounds_beaten": 4,
+      "won": false,
+      "length": 61
+    },
+    {
+      "seed": "EVAL_121",
+      "ante_reached": 1,
+      "rounds_beaten": 1,
+      "won": false,
+      "length": 9
+    },
+    {
+      "seed": "EVAL_122",
+      "ante_reached": 2,
+      "rounds_beaten": 6,
+      "won": false,
+      "length": 44
+    },
+    {
+      "seed": "EVAL_123",
+      "ante_reached": 1,
+      "rounds_beaten": 1,
+      "won": false,
+      "length": 28
+    },
+    {
+      "seed": "EVAL_124",
+      "ante_reached": 1,
+      "rounds_beaten": 2,
+      "won": false,
+      "length": 17
+    },
+    {
+      "seed": "EVAL_125",
+      "ante_reached": 1,
+      "rounds_beaten": 2,
+      "won": false,
+      "length": 21
+    },
+    {
+      "seed": "EVAL_126",
+      "ante_reached": 1,
+      "rounds_beaten": 2,
+      "won": false,
+      "length": 38
+    },
+    {
+      "seed": "EVAL_127",
+      "ante_reached": 1,
+      "rounds_beaten": 3,
+      "won": false,
+      "length": 31
+    },
+    {
+      "seed": "EVAL_128",
+      "ante_reached": 1,
+      "rounds_beaten": 2,
+      "won": false,
+      "length": 16
+    },
+    {
+      "seed": "EVAL_129",
+      "ante_reached": 1,
+      "rounds_beaten": 3,
+      "won": false,
+      "length": 27
+    },
+    {
+      "seed": "EVAL_130",
+      "ante_reached": 2,
+      "rounds_beaten": 4,
+      "won": false,
+      "length": 63
+    },
+    {
+      "seed": "EVAL_131",
+      "ante_reached": 2,
+      "rounds_beaten": 5,
+      "won": false,
+      "length": 42
+    },
+    {
+      "seed": "EVAL_132",
+      "ante_reached": 1,
+      "rounds_beaten": 3,
+      "won": false,
+      "length": 24
+    },
+    {
+      "seed": "EVAL_133",
+      "ante_reached": 1,
+      "rounds_beaten": 2,
+      "won": false,
+      "length": 39
+    },
+    {
+      "seed": "EVAL_134",
+      "ante_reached": 3,
+      "rounds_beaten": 8,
+      "won": false,
+      "length": 77
+    },
+    {
+      "seed": "EVAL_135",
+      "ante_reached": 1,
+      "rounds_beaten": 3,
+      "won": false,
+      "length": 26
+    },
+    {
+      "seed": "EVAL_136",
+      "ante_reached": 1,
+      "rounds_beaten": 2,
+      "won": false,
+      "length": 18
+    },
+    {
+      "seed": "EVAL_137",
+      "ante_reached": 1,
+      "rounds_beaten": 3,
+      "won": false,
+      "length": 52
+    },
+    {
+      "seed": "EVAL_138",
+      "ante_reached": 3,
+      "rounds_beaten": 8,
+      "won": false,
+      "length": 60
+    },
+    {
+      "seed": "EVAL_139",
+      "ante_reached": 1,
+      "rounds_beaten": 2,
+      "won": false,
+      "length": 14
+    },
+    {
+      "seed": "EVAL_140",
+      "ante_reached": 1,
+      "rounds_beaten": 2,
+      "won": false,
+      "length": 35
+    },
+    {
+      "seed": "EVAL_141",
+      "ante_reached": 2,
+      "rounds_beaten": 3,
+      "won": false,
+      "length": 43
+    },
+    {
+      "seed": "EVAL_142",
+      "ante_reached": 1,
+      "rounds_beaten": 3,
+      "won": false,
+      "length": 26
+    },
+    {
+      "seed": "EVAL_143",
+      "ante_reached": 2,
+      "rounds_beaten": 5,
+      "won": false,
+      "length": 35
+    },
+    {
+      "seed": "EVAL_144",
+      "ante_reached": 1,
+      "rounds_beaten": 2,
+      "won": false,
+      "length": 19
+    },
+    {
+      "seed": "EVAL_145",
+      "ante_reached": 2,
+      "rounds_beaten": 4,
+      "won": false,
+      "length": 47
+    },
+    {
+      "seed": "EVAL_146",
+      "ante_reached": 1,
+      "rounds_beaten": 3,
+      "won": false,
+      "length": 33
+    },
+    {
+      "seed": "EVAL_147",
+      "ante_reached": 1,
+      "rounds_beaten": 2,
+      "won": false,
+      "length": 15
+    },
+    {
+      "seed": "EVAL_148",
+      "ante_reached": 1,
+      "rounds_beaten": 3,
+      "won": false,
+      "length": 30
+    },
+    {
+      "seed": "EVAL_149",
+      "ante_reached": 1,
+      "rounds_beaten": 2,
+      "won": false,
+      "length": 39
+    },
+    {
+      "seed": "EVAL_150",
+      "ante_reached": 1,
+      "rounds_beaten": 2,
+      "won": false,
+      "length": 38
+    },
+    {
+      "seed": "EVAL_151",
+      "ante_reached": 1,
+      "rounds_beaten": 3,
+      "won": false,
+      "length": 31
+    },
+    {
+      "seed": "EVAL_152",
+      "ante_reached": 2,
+      "rounds_beaten": 5,
+      "won": false,
+      "length": 73
+    },
+    {
+      "seed": "EVAL_153",
+      "ante_reached": 3,
+      "rounds_beaten": 8,
+      "won": false,
+      "length": 87
+    },
+    {
+      "seed": "EVAL_154",
+      "ante_reached": 1,
+      "rounds_beaten": 2,
+      "won": false,
+      "length": 24
+    },
+    {
+      "seed": "EVAL_155",
+      "ante_reached": 1,
+      "rounds_beaten": 1,
+      "won": false,
+      "length": 10
+    },
+    {
+      "seed": "EVAL_156",
+      "ante_reached": 1,
+      "rounds_beaten": 3,
+      "won": false,
+      "length": 25
+    },
+    {
+      "seed": "EVAL_157",
+      "ante_reached": 1,
+      "rounds_beaten": 3,
+      "won": false,
+      "length": 61
+    },
+    {
+      "seed": "EVAL_158",
+      "ante_reached": 1,
+      "rounds_beaten": 1,
+      "won": false,
+      "length": 7
+    },
+    {
+      "seed": "EVAL_159",
+      "ante_reached": 2,
+      "rounds_beaten": 5,
+      "won": false,
+      "length": 47
+    },
+    {
+      "seed": "EVAL_160",
+      "ante_reached": 2,
+      "rounds_beaten": 6,
+      "won": false,
+      "length": 64
+    },
+    {
+      "seed": "EVAL_161",
+      "ante_reached": 1,
+      "rounds_beaten": 2,
+      "won": false,
+      "length": 20
+    },
+    {
+      "seed": "EVAL_162",
+      "ante_reached": 1,
+      "rounds_beaten": 2,
+      "won": false,
+      "length": 14
+    },
+    {
+      "seed": "EVAL_163",
+      "ante_reached": 1,
+      "rounds_beaten": 2,
+      "won": false,
+      "length": 18
+    },
+    {
+      "seed": "EVAL_164",
+      "ante_reached": 1,
+      "rounds_beaten": 1,
+      "won": false,
+      "length": 31
+    },
+    {
+      "seed": "EVAL_165",
+      "ante_reached": 1,
+      "rounds_beaten": 1,
+      "won": false,
+      "length": 26
+    },
+    {
+      "seed": "EVAL_166",
+      "ante_reached": 1,
+      "rounds_beaten": 2,
+      "won": false,
+      "length": 37
+    },
+    {
+      "seed": "EVAL_167",
+      "ante_reached": 1,
+      "rounds_beaten": 1,
+      "won": false,
+      "length": 28
+    },
+    {
+      "seed": "EVAL_168",
+      "ante_reached": 1,
+      "rounds_beaten": 2,
+      "won": false,
+      "length": 40
+    },
+    {
+      "seed": "EVAL_169",
+      "ante_reached": 2,
+      "rounds_beaten": 4,
+      "won": false,
+      "length": 52
+    },
+    {
+      "seed": "EVAL_170",
+      "ante_reached": 2,
+      "rounds_beaten": 6,
+      "won": false,
+      "length": 47
+    },
+    {
+      "seed": "EVAL_171",
+      "ante_reached": 1,
+      "rounds_beaten": 2,
+      "won": false,
+      "length": 15
+    },
+    {
+      "seed": "EVAL_172",
+      "ante_reached": 1,
+      "rounds_beaten": 2,
+      "won": false,
+      "length": 41
+    },
+    {
+      "seed": "EVAL_173",
+      "ante_reached": 1,
+      "rounds_beaten": 1,
+      "won": false,
+      "length": 5
+    },
+    {
+      "seed": "EVAL_174",
+      "ante_reached": 1,
+      "rounds_beaten": 2,
+      "won": false,
+      "length": 16
+    },
+    {
+      "seed": "EVAL_175",
+      "ante_reached": 2,
+      "rounds_beaten": 6,
+      "won": false,
+      "length": 53
+    },
+    {
+      "seed": "EVAL_176",
+      "ante_reached": 1,
+      "rounds_beaten": 2,
+      "won": false,
+      "length": 14
+    },
+    {
+      "seed": "EVAL_177",
+      "ante_reached": 2,
+      "rounds_beaten": 6,
+      "won": false,
+      "length": 63
+    },
+    {
+      "seed": "EVAL_178",
+      "ante_reached": 1,
+      "rounds_beaten": 2,
+      "won": false,
+      "length": 20
+    },
+    {
+      "seed": "EVAL_179",
+      "ante_reached": 1,
+      "rounds_beaten": 2,
+      "won": false,
+      "length": 17
+    },
+    {
+      "seed": "EVAL_180",
+      "ante_reached": 2,
+      "rounds_beaten": 4,
+      "won": false,
+      "length": 32
+    },
+    {
+      "seed": "EVAL_181",
+      "ante_reached": 2,
+      "rounds_beaten": 4,
+      "won": false,
+      "length": 41
+    },
+    {
+      "seed": "EVAL_182",
+      "ante_reached": 1,
+      "rounds_beaten": 1,
+      "won": false,
+      "length": 27
+    },
+    {
+      "seed": "EVAL_183",
+      "ante_reached": 2,
+      "rounds_beaten": 6,
+      "won": false,
+      "length": 68
+    },
+    {
+      "seed": "EVAL_184",
+      "ante_reached": 1,
+      "rounds_beaten": 2,
+      "won": false,
+      "length": 18
+    },
+    {
+      "seed": "EVAL_185",
+      "ante_reached": 1,
+      "rounds_beaten": 2,
+      "won": false,
+      "length": 35
+    },
+    {
+      "seed": "EVAL_186",
+      "ante_reached": 1,
+      "rounds_beaten": 3,
+      "won": false,
+      "length": 22
+    },
+    {
+      "seed": "EVAL_187",
+      "ante_reached": 1,
+      "rounds_beaten": 3,
+      "won": false,
+      "length": 26
+    },
+    {
+      "seed": "EVAL_188",
+      "ante_reached": 2,
+      "rounds_beaten": 6,
+      "won": false,
+      "length": 54
+    },
+    {
+      "seed": "EVAL_189",
+      "ante_reached": 1,
+      "rounds_beaten": 3,
+      "won": false,
+      "length": 41
+    },
+    {
+      "seed": "EVAL_190",
+      "ante_reached": 1,
+      "rounds_beaten": 3,
+      "won": false,
+      "length": 32
+    },
+    {
+      "seed": "EVAL_191",
+      "ante_reached": 1,
+      "rounds_beaten": 3,
+      "won": false,
+      "length": 47
+    },
+    {
+      "seed": "EVAL_192",
+      "ante_reached": 2,
+      "rounds_beaten": 6,
+      "won": false,
+      "length": 53
+    },
+    {
+      "seed": "EVAL_193",
+      "ante_reached": 1,
+      "rounds_beaten": 3,
+      "won": false,
+      "length": 17
+    },
+    {
+      "seed": "EVAL_194",
+      "ante_reached": 2,
+      "rounds_beaten": 6,
+      "won": false,
+      "length": 50
+    },
+    {
+      "seed": "EVAL_195",
+      "ante_reached": 1,
+      "rounds_beaten": 2,
+      "won": false,
+      "length": 14
+    },
+    {
+      "seed": "EVAL_196",
+      "ante_reached": 1,
+      "rounds_beaten": 3,
+      "won": false,
+      "length": 48
+    },
+    {
+      "seed": "EVAL_197",
+      "ante_reached": 1,
+      "rounds_beaten": 2,
+      "won": false,
+      "length": 34
+    },
+    {
+      "seed": "EVAL_198",
+      "ante_reached": 1,
+      "rounds_beaten": 3,
+      "won": false,
+      "length": 47
+    },
+    {
+      "seed": "EVAL_199",
+      "ante_reached": 1,
+      "rounds_beaten": 2,
+      "won": false,
+      "length": 41
+    }
+  ]
+}

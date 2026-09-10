@@ -34,6 +34,7 @@ from dataclasses import asdict, dataclass
 
 sys.path.insert(0, ".")
 
+import torch
 from sb3_contrib import MaskablePPO
 
 from jackdaw.env.eval_seeds import EVAL_SEEDS
@@ -50,6 +51,17 @@ class PPOEpisodeResult:
     length: int
 
 
+def needs_lookahead(model: MaskablePPO) -> bool:
+    """Whether *model* was trained with the lookahead observation channel.
+
+    Read from the model's own saved observation space rather than asked for
+    on the command line: an eval env built with the wrong setting produces a
+    silent mismatch between the checkpoint and the observation it is fed, and
+    the whole point of this script is that its number can be trusted.
+    """
+    return "lookahead" in getattr(model.observation_space, "spaces", {})
+
+
 def run_ppo_episode(
     model: MaskablePPO,
     seed: str,
@@ -58,6 +70,7 @@ def run_ppo_episode(
     stake: int = 1,
     max_steps: int = 2_000,
     deterministic: bool = True,
+    lookahead: bool | None = None,
 ) -> PPOEpisodeResult:
     """Run one episode of *model* against a fresh BalatroGymnasiumEnv.
 
@@ -70,6 +83,7 @@ def run_ppo_episode(
         back_keys=[back_key],
         stakes=[stake],
         max_steps=max_steps,
+        lookahead_features=needs_lookahead(model) if lookahead is None else lookahead,
     )
     obs, info = env.reset(options={"game_seed": seed})
     mask = info["action_mask"]
@@ -93,6 +107,7 @@ def run_ppo_episode(
 
 
 def evaluate_ppo(model: MaskablePPO, seeds: list[str], **episode_kwargs: object) -> dict:
+    episode_kwargs.setdefault("lookahead", needs_lookahead(model))
     results = [run_ppo_episode(model, seed, **episode_kwargs) for seed in seeds]
     antes = [r.ante_reached for r in results]
     lengths = [r.length for r in results]
@@ -128,6 +143,13 @@ def main() -> None:
     parser.add_argument("--out", default=None, help="Optional path to write a JSON summary")
     args = parser.parse_args()
 
+    # Same reason as scripts/train_ppo.py::disable_distribution_validation —
+    # a float32 softmax over MAX_ACTIONS=500 categories occasionally lands
+    # just outside Simplex()'s 1e-6 tolerance. Eval builds the same
+    # distribution on every predict() call, so an unlucky rounding would
+    # abort a 200-episode run for no reason.
+    torch.distributions.Distribution.set_default_validate_args(False)
+
     seeds = EVAL_SEEDS[: args.episodes]
     model = MaskablePPO.load(args.model)
 
@@ -143,6 +165,7 @@ def main() -> None:
     elapsed = time.time() - t0
 
     print(f"Model:       {args.model}")
+    print(f"Lookahead:   {'yes' if needs_lookahead(model) else 'no'} (from the checkpoint)")
     print(f"Episodes:    {summary['episodes']}")
     print(f"Mean ante:   {summary['mean_ante']:.2f}")
     print(f"Max ante:    {summary['max_ante']}")

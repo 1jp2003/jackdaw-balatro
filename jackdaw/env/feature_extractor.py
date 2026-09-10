@@ -66,6 +66,42 @@ class BalatroExtractor(BaseFeaturesExtractor):
         width).
     global_hidden_dim:
         Hidden width of the global-context MLP.
+    embed_init_std:
+        Std of the catalog embedding initialization. Defaults to 1.0
+        (``nn.Embedding``'s own default) — shrinking it was tried and did
+        not help, see the note below before changing it.
+
+    Embedding init scale — tried shrinking, it did not help
+    ------------------------------------------------------
+    Measured with ``scripts/embed_drift.py`` (docs/RUNS.md, "the joker
+    embeddings barely move"): after 500k steps the joker table has drifted
+    **2.2%** from its random init, consumable 0.8%, shop_item 3.2%. The
+    tables are effectively frozen at whatever they were initialized to — so
+    init scale is not a minor detail, it *is* most of what the network sees.
+
+    This is **not** an exposure problem, despite an earlier analysis here
+    saying so. 142 of the 150 reachable joker keys (95%) receive gradient;
+    the earlier "161/300 rows never seen" figure counted against the whole
+    shared catalog, but only 150 of those 299 keys are jokers at all. What
+    is small is the update per exposure: a seen row moves ~3% of its own
+    length over a full run.
+
+    The obvious-looking inference — "an untrained N(0,1) row is a norm-5.66
+    random vector drowning 15 normalized feature dims, so shrink it so
+    unseen rows are ≈0 and the extractor degrades gracefully to
+    features-only" — was tested in run 10 (`embed_init_std=0.1`, otherwise
+    identical to run 7) and came out at **mean ante 1.07 vs run 7's 1.26**,
+    the lowest of any non-buggy run.
+
+    The likely reason it backfired: a fixed random row is not only noise, it
+    is also a *random identity code*. A unique separable 32-dim signature
+    per joker is something the downstream Linear can read to tell jokers
+    apart with zero training (the random-features effect). Shrinking the
+    init 10× removed that distinguishability and made every joker look
+    nearly alike, which evidently cost more than the noise it removed.
+    Default reverted to 1.0; the parameter is kept for further study, but
+    treat "small init is obviously better" as a hypothesis already tried
+    and not supported.
     """
 
     def __init__(
@@ -75,6 +111,7 @@ class BalatroExtractor(BaseFeaturesExtractor):
         embed_dim: int = 32,
         entity_hidden_dim: int = 64,
         global_hidden_dim: int = 128,
+        embed_init_std: float = 1.0,
     ) -> None:
         super().__init__(observation_space, features_dim)
 
@@ -96,7 +133,15 @@ class BalatroExtractor(BaseFeaturesExtractor):
                 # excluded from gradient updates and stays at its initial
                 # (effectively arbitrary) value, which is fine since
                 # padding slots are also zeroed out of the pooled mean.
-                self.embeddings[name] = nn.Embedding(catalog_size + 1, embed_dim, padding_idx=0)
+                embedding = nn.Embedding(catalog_size + 1, embed_dim, padding_idx=0)
+                # Re-init small (see "Embedding init scale" above). normal_
+                # overwrites every row including padding_idx, which
+                # nn.Embedding had zeroed at construction — restore that
+                # zero explicitly or padding slots stop being neutral.
+                with torch.no_grad():
+                    nn.init.normal_(embedding.weight, mean=0.0, std=embed_init_std)
+                    embedding.weight[0].fill_(0.0)
+                self.embeddings[name] = embedding
                 in_dim = feat_dim + embed_dim
             else:
                 # Flattened path (hand_card/pack_card): input is every
@@ -105,8 +150,16 @@ class BalatroExtractor(BaseFeaturesExtractor):
                 in_dim = max_count * feat_dim
             self.entity_mlps[name] = nn.Sequential(nn.Linear(in_dim, entity_hidden_dim), nn.ReLU())
 
+        # The optional lookahead block (docs/RL_PLAN.md §5.3 Level 2) is
+        # concatenated onto the global context rather than given its own
+        # branch: it *is* global context — a summary of the whole menu, not
+        # a per-entity quantity — and it is far too small (8 dims) to earn a
+        # separate MLP. Read the width from the space so this module stays
+        # agnostic about how many features the env chose to emit.
+        lookahead_space = observation_space.spaces.get("lookahead")
+        self._lookahead_dim = 0 if lookahead_space is None else int(lookahead_space.shape[0])
         self.global_mlp = nn.Sequential(
-            nn.Linear(spec.global_feature_dim, global_hidden_dim), nn.ReLU()
+            nn.Linear(spec.global_feature_dim + self._lookahead_dim, global_hidden_dim), nn.ReLU()
         )
 
         summary_total = entity_hidden_dim * len(self._entity_info)
@@ -140,7 +193,10 @@ class BalatroExtractor(BaseFeaturesExtractor):
             pooled = (h * valid).sum(dim=1) / valid.sum(dim=1).clamp(min=1.0)  # (B, hidden)
             entity_parts.append(pooled)
 
-        global_h = self.global_mlp(observations["global"])
+        global_x = observations["global"]
+        if self._lookahead_dim:
+            global_x = torch.cat([global_x, observations["lookahead"]], dim=-1)
+        global_h = self.global_mlp(global_x)
         combined = torch.cat([global_h, *entity_parts], dim=-1)
         return self.head(combined)
 

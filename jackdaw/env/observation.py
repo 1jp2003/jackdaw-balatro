@@ -59,6 +59,19 @@ def center_key_id(key: str) -> int:
     return _CENTER_KEY_TO_ID.get(key, 0)
 
 
+def iter_center_keys() -> list[str]:
+    """Every catalog center key, in ID order (ID 1 first).
+
+    The catalog is one shared ID space across every entity type, so a given
+    embedding table can only ever be reached by the subset of keys whose
+    prefix matches it (``j_`` jokers, ``c_`` consumables, ``v_`` vouchers,
+    ``p_`` booster packs, ...). Callers reasoning about embedding-table
+    coverage need that subset as their denominator, not the table height —
+    see ``scripts/embed_drift.py`` and docs/RUNS.md.
+    """
+    return sorted(_CENTER_KEY_TO_ID, key=_CENTER_KEY_TO_ID.__getitem__)
+
+
 def encode_catalog_ids(cards: list[Card]) -> np.ndarray:
     """Raw integer catalog IDs for a list of cards, shape ``(len(cards),)`` int32.
 
@@ -305,11 +318,19 @@ D_GLOBAL: int = _D_OLD_GLOBAL + _D_STRATEGIC  # 235
 _LOG2 = math.log(2.0)
 
 
-def _log_scale(x: float) -> float:
-    """Log-scale large values: sign(x) * log2(1 + |x|)."""
+def log_scale(x: float) -> float:
+    """Log-scale large values: sign(x) * log2(1 + |x|).
+
+    Sign-symmetric, so it is safe for negative dollars — ruled out as a NaN
+    source (docs/RL_PLAN.md §4, "Not a defect").
+    """
     if x >= 0:
         return math.log2(1.0 + x)
     return -math.log2(1.0 - x)
+
+
+# Internal alias: this module's own call sites predate the public name.
+_log_scale = log_scale
 
 
 def _log_scale_arr(arr: np.ndarray) -> np.ndarray:

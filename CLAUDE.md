@@ -15,6 +15,7 @@ architecture decisions, and phase plan. This file is the short version.
 uv sync --dev                                # install with dev deps (test, lint)
 uv sync --extra train                        # add training deps (torch, sb3, tensorboard)
 python scripts/train_ppo.py --total-timesteps 500000
+python scripts/train_ppo.py --total-timesteps 500000 --lookahead   # + §5.3 L2 features
 tensorboard --logdir runs/balatro_ppo
 pytest                                       # tests
 pytest --cov=jackdaw                         # with coverage
@@ -58,10 +59,16 @@ jackdaw/
   cli/             `jackdaw` entry point — `validate` subcommand + scenarios
 scripts/
   train_ppo.py     MaskablePPO training
+  eval_ppo.py      Eval a checkpoint on the frozen seed set — the only real number
+  eval_agent.py    Same, for the heuristic/random baselines
+  bench_step.py    Where wall-clock goes: env vs network
+  embed_drift.py   Did an embedding table actually learn anything
+  lookahead_ablation.py  Does the policy actually use the lookahead features
   validate.py      Unified validation CLI (seed/crash/live/benchmark)
   lua_*_oracle.lua Lua reference oracles for RNG/scoring/hand-eval parity
 docs/
-  RL_PLAN.md       Full project plan — read this
+  RL_PLAN.md       The plan: what to do next and why — read this
+  RUNS.md          The lab notebook: every run, what it scored, what it taught
   rl-guide.md      Gymnasium wrapper / observation / action / reward guide
   validation.md    Validation & scenario-writing guide
 tests/
@@ -92,112 +99,112 @@ code cross-platform.
 
 ## Current state
 
-MaskablePPO on `MultiInputPolicy`, Red Deck / White Stake.
+MaskablePPO on `MultiInputPolicy`, Red Deck / White Stake. Twelve runs;
+per-run detail in `docs/RUNS.md`, the plan in `docs/RL_PLAN.md`.
 
-- **Scripted heuristic baseline (exact one-step lookahead): mean ante 2.75,
-  win rate 0%** — `HeuristicAgent`, `uv run scripts/eval_agent.py --agent
-  heuristic --episodes 200`. This is the number PPO has to beat.
-- **PPO run 5 (500k steps, first run post Phase-0 fixes): mean ante 1.26,
-  win rate 0%** — first *real* eval-seed number (`scripts/eval_ppo.py`,
-  `results/ppo_run5.json`); runs 1-4's "~1.08" was a rollout statistic, not
-  an eval-seed one, and sparse-mode metrics were broken anyway (known issue
-  #7). **Does not beat the heuristic.**
-- Run 5 completed all 500k steps with **no NaN crash**, unlike runs 3/4 —
-  plausibly the Phase 0 fixes, not confirmed (one run, not an ablation).
-- **Phase 1's highest-value fix (joker/consumable/shop identity embeddings)
-  is implemented**: `BalatroExtractor` (`jackdaw/env/feature_extractor.py`),
-  `--extractor balatro` (default) in `train_ppo.py`.
-  **Run 6 (first attempt, pooled all 5 entity types) regressed**: mean ante
-  1.00 (vs run 5's 1.26) despite healthy training curves (`explained_variance`
-  0.59, no crash) — pooling `hand_card` destroyed per-card identity
-  `PlayHand`/`Discard` need. **Fixed**: pooling now only applies to
-  joker/consumable/shop_item; hand_card/pack_card are flattened
-  (position-preserving). Regression test added. **Runs 7 and 8 (the fix,
-  two seeds): mean ante 1.26 and 1.13** — both in the same 1.1-1.3 band as
-  run 5's default-extractor 1.265. The run-to-run spread *within* the fixed
-  extractor (0.13) is as large as the gap to run 5, so at 500k steps the
-  two architectures are statistically indistinguishable — **confirmed not
-  broken (unlike run 6), but no detectable benefit yet either.**
-- **Run 9 (attempted 1M-step run) crashed at step 409,600 — the NaN-in-logits
-  failure from runs 3/4 came back**, with `share_features_extractor=False`
-  in place and *without* the gradual `explained_variance`/`value_loss`
-  precursor pattern that flagged runs 3/4 in advance — a flat, healthy
-  training signal right up to a sudden crash. Turned out not to be a clean
-  step-count test: `learning_rate`/`clip_range` are scheduled on *fraction
-  of declared* `--total-timesteps`, so run 9's effective LR was >3× run 7's
-  at the same step count (a longer declared horizon decays slower) —
-  plausibly the actual trigger, echoing runs 3/4's original
-  reward-scale/critic-blowup mechanism rather than proving the new
-  architecture itself is unstable. Also found and fixed while
-  investigating: `EntCoefSchedule` was hardcoded to `total_timesteps=500_000`
-  regardless of the CLI flag, and `CheckpointCallback` wrote to a flat
-  `checkpoints/` folder shared across every run using the same `--log-dir`
-  (silently collision-prone — now a timestamped subfolder per invocation).
-  Checkpointing itself worked as intended: only ~10k steps were lost, not
-  360k+. **Any future long run should be read as also having a different
-  LR/clip_range trajectory, not a clean extension, until that's addressed.**
-  Full diagnosis in `docs/RL_PLAN.md` §3 "Run 6" through "Run 9".
-- 25% of run 5's eval episodes used to stall at ante 1 for the full
-  2,000-step budget, spamming a no-op action (`SwapHandLeft`) instead of
-  playing — **known issue #15, fixed**: a generic stall detector in
-  `BalatroGymnasiumEnv` now force-truncates + penalizes N steps without
-  chip/round/ante/hand/discard/dollar progress. Validated against the
-  existing Run 5 checkpoint with no retraining: mean length 520.9 → 30.0,
-  eval throughput 1.6 → 26.1 eps/sec, mean ante unchanged (1.26).
-- Throughput: ~417-540 steps/sec single-env CPU (varies by hand/joker size
-  now that entity max_counts are raised, issue #5).
-- **Hyperparameter tuning is exhausted.** Runs 3 and 4 had very different policy
-  dynamics and near-identical task performance. The bottleneck is the
-  observation encoding and the action space.
+| Agent | Mean ante | Max ante | Win rate |
+|---|---|---|---|
+| Random | 1.00 | — | 0% |
+| **Heuristic** (exact one-step lookahead) | **2.75** | 7 | 0% |
+| **Best PPO** (run 15, lookahead, seed 1) | **1.57** | 5 | 0% |
+
+The heuristic is `HeuristicAgent` (`uv run scripts/eval_agent.py --agent
+heuristic --episodes 200`) and is the number PPO has to beat. It doesn't yet.
+
+- **The action table was the bottleneck, and fixing it is the only change
+  that has produced a confirmed gain.** A deterministic top-K menu (issue #2)
+  moved 1.26 → 1.42 across two seeds, ante-1 clear rates 73/70 per 200 vs a
+  pre-fix 11-38. Non-overlapping on both metrics with the within-group spread
+  collapsed — the tightness is what makes it convincing, not the size.
+- **The ceiling did not move.** Max ante is still 3-4 across every run. Better
+  at clearing the first blind, no better at going deep — that needs jokers,
+  economy and shop play, none of which has been worked on.
+- **Stop tuning the embedding path.** Four `balatro`-extractor runs average
+  ~1.14 vs the default extractor's 1.26: all-entity pooling (run 6, 1.00,
+  broken), fixed pooling (runs 7/8, 1.26/1.13), small init (run 10, 1.07).
+- **The embedding tables sit at ~97% of their random init — but exposure is
+  *not* why.** The agent touches **95% of the reachable joker catalog** (142
+  of 150 `j_` keys receive gradient in 500k steps), and did so before the
+  action-table fix too. Each exposure just moves a row ~3% of its own length.
+  The earlier "161 of 300 joker rows never seen" claim measured against the
+  wrong denominator — the catalog is one shared 299-key ID space over all
+  entity types, of which only 150 are jokers. **Corollary: more survival will
+  not make the embeddings train.** The gap is credit assignment, not data.
+  Reproduce with `uv run scripts/embed_drift.py <ckpt> <seed>`.
+- **Hyperparameter tuning is exhausted.** Runs 3 and 4 had very different
+  policy dynamics and near-identical task performance.
+- **The seed-to-seed noise floor is ≈0.13 mean ante.** A single run landing
+  0.1 above another means nothing; confirm every positive with a second seed.
+- **The "NaN in logits" crash is solved, and it was never a NaN.** Four runs
+  died to it (3, 4, 9, 14). Instrumented reproduction of run 14 caught the
+  event: logits finite and healthy ([-14.21, -0.29]), and **one row of 256**
+  whose float32 softmax summed to 1.0000010729 — past `Simplex()`'s fixed
+  1e-6 tolerance by 7.3e-8. The trigger is an ordering bug in sb3-contrib's
+  `MaskableCategorical.apply_masking`, which re-runs `Categorical.__init__`
+  *before* refreshing `self.probs`, so PyTorch validates the stale probs from
+  the previous **unmasked** 500-way parameterization. Fix:
+  `Distribution.set_default_validate_args(False)` in `train_ppo.py` and
+  `eval_ppo.py`; regression tests in `tests/env/test_action_distribution.py`.
+  This retires "critic blowup" as the explanation for anything after run 4.
+- **Lookahead features (§5.3 Level 2) give a real but inconsistent gain.**
+  At 500k: 1.46/1.565 (lookahead) vs 1.420/1.420 (without) — non-overlapping
+  on mean and clear rate, group gap +0.09, and run 15 is the first run to
+  reach **ante 5** (the ceiling had been 3-4 since forever). The mean alone
+  would be only suggestive; the **ablation** is what settles it — permuting
+  the block costs run 15 **0.19 ante** (to 1.375, below the no-lookahead
+  baseline), so its gain is causally attributable to the feature content.
+  Run 13 barely reacts (−0.025). What varies across seeds is whether the
+  policy *learns to use* the features, not whether they carry signal.
+  Next lever: dim 1 (`log2(best)`, mean 7.16) outweighs the decision-relevant
+  ratio dims by ~17× in raw pre-activation contribution — `norm_obs=False`,
+  so raw scale matters. Rescaling it is a cheap isolated test.
+- **`--total-timesteps` also changes the LR schedule.** SB3 schedules
+  `learning_rate`/`clip_range` on fraction of *declared* total steps, so a
+  longer run is not a clean extension of a shorter one.
+- **Throughput ~171 steps/sec** (~50 min per 500k run), down from 524 before
+  the top-K table. ~92% of env wall-clock is `_enumerate_actions`; the network
+  is <20%. fps varies ±70% between runs on identical code — never read it as
+  a code signal without `uv run scripts/bench_step.py`.
 
 ---
 
 ## Known issues
 
-Ordered by impact. Full detail with file:line in `docs/RL_PLAN.md` §4.
+Numbers are stable identifiers referenced from code comments and tests —
+**never renumber, append**. Full detail with file:line in `docs/RL_PLAN.md` §4.
 
-1. **`center_key` encoded as a normalized float** (`observation.py:420`) —
-   destroys joker identity. *Highest-value fix* — **fixed**: raw integer IDs
-   now also emitted (`observation.py::encode_catalog_ids`,
-   `obs["{name}_ids"]`) and consumed by `jackdaw/env/feature_extractor.py::
-   BalatroExtractor` (`nn.Embedding` + masked-mean pooling per entity
-   type). Wire with `--extractor balatro` (default) in `train_ppo.py`. Not
-   yet run at full 500k-step scale against the Run 5 baseline.
-2. **`_enumerate_actions` randomly subsamples** when legal actions > 500
-   (`gymnasium_wrapper.py:331`) — legal actions vanish nondeterministically.
-3. **`seed_prefix` collides across parallel workers** (`balatro_env.py`) — all
-   `SubprocVecEnv` workers play identical games. Fails silently.
-4. **Shared features extractor** — a value-function blowup corrupts the policy.
-   **Fixed**: `share_features_extractor=False` bundled into the
-   `--extractor balatro` wiring above (train_ppo.py).
-5. **Entity `max_count` too low** (`balatro_spec.py`: hand 8, jokers 5) — the
-   agent can act on cards it never observed.
-6. **`Monitor` lost when passing `VecNormalize`** — kills `ep_rew_mean` /
-   `ep_len_mean` logging. Wrap inside the env lambda.
-7. **Metrics broken when `reward_shaping=False`** — early return skips tracker
-   updates.
-8. **Stale reference to `action_heads`** in `balatro_spec.py`. No such module
-   exists; there is no policy/encoder module in `jackdaw/env/`.
-14. **`BalatroGymnasiumEnv._rng` unseeded on a `game_seed`-only reset —
-    fixed.** Made eval on a "frozen" seed non-reproducible whenever
-    action-table subsampling triggered. Doesn't affect the heuristic/random
-    baselines (they use the factored `BalatroEnvironment` interface, never
-    this RNG).
-15. **Deterministic policy stalls on no-op action loops — fixed.**
-    25% of run 5's eval episodes used to hit `max_steps=2000` stuck at
-    ante 1, spamming `SwapHandLeft`. Generic no-progress stall detector
-    in `BalatroGymnasiumEnv` now force-truncates + penalizes.
+**Open:** #8 discard histogram is presence not counts (and covers the discard
+pile, not the more useful draw pile) · #9 joker rarity is a `base_cost` proxy ·
+#10 `ability_extra` sums unrelated fields into one float · #11 unseeded RNG on
+the default (non-eval) paths · #12 `GameEnvironment.step` protocol arity drift ·
+#17 `SubprocVecEnv` never enabled — the throughput lever.
+
+**Fixed:** #1 `center_key` as a normalized float (raw IDs now emitted and
+consumed by `BalatroExtractor`) · #2 random action-table subsampling
+(deterministic top-K, recall@10 95%, 500 → ~33 entries) · #3 `seed_prefix`
+collision across workers · #4 shared features extractor · #5 entity
+`max_count` too low (now 20/10) · #6 `Monitor` lost behind `VecNormalize` ·
+#7 metrics dead in sparse mode · #13 stale `action_heads` reference · #14
+`_rng` unseeded on a `game_seed`-only reset (broke eval reproducibility) ·
+#15 deterministic policy stalling on no-op loops (generic stall detector) ·
+#16 `EntCoefSchedule` hardcoded denominator + `CheckpointCallback` writing to
+a shared directory.
 
 ---
 
 ## Conventions
 
-- **Never change reward shaping and hyperparameters in the same run.** Four
-  existing runs are only partly comparable because of this.
+- **Never change reward shaping and hyperparameters in the same run.** This
+  applies to architecture too — run 6 bundled embeddings *and* pooling and its
+  negative result couldn't say which was responsible.
+- **Confirm any positive result with a second seed.** The noise floor is ≈0.13
+  mean ante; runs 6 and 10 both looked plausible and didn't survive.
 - Checkpoint every 50k steps. A crash at 364k already cost a full run.
 - Compare results on the frozen eval seed set, not rollout statistics —
   `uv run scripts/eval_agent.py --agent <random|heuristic> --episodes 200`,
   seeds from `jackdaw/env/eval_seeds.py::EVAL_SEEDS`.
+- **Record every run in `docs/RUNS.md`** — the change, the eval number, the
+  ante distribution, what it ruled in or out. `RL_PLAN.md` stays the plan.
 - Pin `mean_ante_reached` charts to a `[1, 8]` axis.
 - No new dependencies without asking.
 - Add observation golden tests before refactoring `observation.py`.
@@ -218,7 +225,12 @@ Ordered by impact. Full detail with file:line in `docs/RL_PLAN.md` §4.
   `RecurrentPPO` separately; combining them means writing it.
 - `_log_scale` is sign-symmetric and safe for negative dollars — not a NaN
   source.
-- `max_steps=10_000` never binds; episodes are ~20 steps.
+- `max_steps=10_000` never binds; episodes are ~20-40 steps.
+- **The catalog is one shared 299-key ID space** across all entity types (150
+  `j_` jokers, 53 `c_` consumables, 32 vouchers, 32 packs, …). An embedding
+  table sized `catalog_size + 1` can only ever be reached by its own prefix —
+  use that subset as the denominator when reasoning about coverage, not the
+  table height.
 - **`spaces.MultiDiscrete`/`Discrete` get one-hot encoded by SB3 before a
   features extractor ever sees them** (`preprocess_obs`) — a raw-integer
   channel meant for `nn.Embedding` (e.g. `joker_ids`) must be `spaces.Box`
@@ -236,5 +248,13 @@ candidate actions can be evaluated exactly by copying state, stepping, and
 reading the result. In the playing phase this makes hand selection a solved
 problem — best-of-218 exact evaluation, no learning required.
 
-This is the project's main advantage and it is currently unused. See
-`docs/RL_PLAN.md` §5.3.
+This is the project's main advantage, now used in all three places it can be:
+the heuristic baseline (2.75) runs full exact lookahead; the action table uses
+a cheap `evaluate_hand` ranking to decide which plays to offer; and
+`obs["lookahead"]` (`--lookahead`, `docs/RL_PLAN.md` §5.3 Level 2) hands the
+policy an 8-dim summary of that ranked menu — chiefly "does my best offered
+play clear this blind now, or across the hands I have left". All three share
+one scoring pass, so the observation channel costs +1.4% per step.
+
+Exact lookahead costs 377 ms per decision (91% of it `deepcopy`), so anything
+inside the training loop must use the cheap path.

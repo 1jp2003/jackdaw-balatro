@@ -261,6 +261,177 @@ class TestCatalogIdChannels:
         assert np.all(obs["joker_ids"][n_jokers:] == 0)
 
 
+class TestDeterministicActionTable:
+    """Known issue #2: PlayHand/Discard combos used to be randomly
+    subsampled, which dropped the optimal play 8.3% of the time at hand
+    size 8 (68.6% at 10) and gave identical states different menus between
+    visits. Now a deterministic top-K by cheap ranking."""
+
+    def _selecting_hand_env(self, seed: str = "ACTION_TABLE") -> BalatroGymnasiumEnv:
+        env = BalatroGymnasiumEnv(adapter_factory=DirectAdapter, max_steps=200)
+        _, info = env.reset(options={"game_seed": seed})
+        legal = int(np.nonzero(info["action_mask"])[0][0])
+        env.step(legal)  # past blind select, hand dealt
+        return env
+
+    def test_same_state_gives_identical_menu(self) -> None:
+        a = self._selecting_hand_env()
+        b = self._selecting_hand_env()
+        table_a = [(fa.action_type, fa.card_target) for fa in a._action_table]
+        table_b = [(fa.action_type, fa.card_target) for fa in b._action_table]
+        assert table_a == table_b
+
+    def test_play_menu_is_bounded_and_small(self) -> None:
+        from jackdaw.env.gymnasium_wrapper import PLAY_COMBO_BUDGET
+
+        env = self._selecting_hand_env()
+        plays = [fa for fa in env._action_table if fa.action_type == ActionType.PlayHand]
+        assert 0 < len(plays) <= PLAY_COMBO_BUDGET
+
+    def test_menu_contains_the_best_play_by_cheap_ranking(self) -> None:
+        """The whole point: the top-ranked play must survive selection."""
+        from itertools import combinations
+
+        from jackdaw.env.gymnasium_wrapper import _cheap_hand_value
+
+        env = self._selecting_hand_env()
+        gs = env._inner._adapter.raw_state
+        hand, jokers, levels = gs["hand"], gs.get("jokers", []), gs.get("hand_levels")
+        all_combos = [c for k in range(1, 6) for c in combinations(range(len(hand)), k)]
+        best = max(
+            all_combos,
+            key=lambda c: _cheap_hand_value([hand[i] for i in c], jokers, levels)[0],
+        )
+        offered = {
+            fa.card_target for fa in env._action_table if fa.action_type == ActionType.PlayHand
+        }
+        assert best in offered
+
+    def test_menu_reserves_small_cardinality_plays(self) -> None:
+        """Setup / draw-preserving plays score badly by construction; if a
+        greedy menu prunes them the policy can never discover them."""
+        env = self._selecting_hand_env()
+        plays = [fa for fa in env._action_table if fa.action_type == ActionType.PlayHand]
+        assert any(len(fa.card_target) == 1 for fa in plays)
+
+
+class TestLookaheadFeatures:
+    """docs/RL_PLAN.md §5.3 Level 2: a bounded summary of the ranked menu the
+    policy is choosing from, computed from the scoring pass the action table
+    already performs."""
+
+    def _env(self, *, lookahead: bool, seed: str = "LOOKAHEAD") -> BalatroGymnasiumEnv:
+        env = BalatroGymnasiumEnv(
+            adapter_factory=DirectAdapter, max_steps=200, lookahead_features=lookahead
+        )
+        _, info = env.reset(options={"game_seed": seed})
+        return env
+
+    def _into_selecting_hand(self, env: BalatroGymnasiumEnv) -> dict[str, np.ndarray]:
+        legal = int(np.nonzero(env.action_masks())[0][0])
+        obs, *_ = env.step(legal)  # past blind select, hand dealt
+        return obs
+
+    def test_channel_is_absent_by_default(self) -> None:
+        """Every checkpoint from runs 5-12 was trained without this channel;
+        adding it unconditionally would make them all unloadable."""
+        env = self._env(lookahead=False)
+        assert "lookahead" not in env.observation_space.spaces
+        obs = self._into_selecting_hand(env)
+        assert "lookahead" not in obs
+
+    def test_channel_matches_declared_space(self) -> None:
+        from jackdaw.env.gymnasium_wrapper import LOOKAHEAD_DIM
+
+        env = self._env(lookahead=True)
+        assert env.observation_space["lookahead"].shape == (LOOKAHEAD_DIM,)
+        obs = self._into_selecting_hand(env)
+        assert env.observation_space.contains(obs)
+        assert obs["lookahead"].shape == (LOOKAHEAD_DIM,)
+        assert obs["lookahead"].dtype == np.float32
+
+    def test_available_flag_distinguishes_no_menu_from_a_zero_menu(self) -> None:
+        """Index 0 is the guard that stops "there is no menu here" from
+        looking identical to "the best play in the menu scores nothing"."""
+        env = BalatroGymnasiumEnv(
+            adapter_factory=DirectAdapter, max_steps=200, lookahead_features=True
+        )
+        # reset() lands at BLIND_SELECT, where no hand is dealt yet and so
+        # no PlayHand menu exists.
+        at_blind_select, _info = env.reset(options={"game_seed": "LOOKAHEAD"})
+        assert np.all(at_blind_select["lookahead"] == 0.0)
+
+        obs = self._into_selecting_hand(env)
+        assert obs["lookahead"][0] == 1.0
+        assert obs["lookahead"][1] > 0.0, "a dealt hand should have a nonzero best play"
+
+    def test_all_fields_stay_bounded(self) -> None:
+        """Unbounded observation features are a live NaN/blowup risk here —
+        every ratio is deliberately clipped, and index 1 is log-scaled."""
+        env = self._env(lookahead=True)
+        rng = np.random.default_rng(0)
+        obs = self._into_selecting_hand(env)
+        seen_available = 0
+        for _ in range(120):
+            block = obs["lookahead"]
+            assert np.all(np.isfinite(block))
+            assert np.all(block >= 0.0)
+            # index 1 is log2(1+chips); everything else is a clipped ratio.
+            assert np.all(block[[0, *range(2, len(block))]] <= 1.0)
+            assert block[1] < 64.0
+            seen_available += int(block[0] == 1.0)
+
+            legal = np.nonzero(env.action_masks())[0]
+            obs, _r, term, trunc, _info = env.step(int(rng.choice(legal)))
+            if term or trunc:
+                break
+        assert seen_available > 0, "expected at least one card-select state"
+
+    def test_features_describe_the_menu_that_is_actually_offered(self) -> None:
+        """The feature must summarize the *offered* set. If it described a
+        play the action table doesn't contain, it would be exactly the
+        incoherence known issue #2 created."""
+        from jackdaw.env.gymnasium_wrapper import _cheap_hand_value, log_scale
+
+        env = self._env(lookahead=True)
+        obs = self._into_selecting_hand(env)
+        assert obs["lookahead"][0] == 1.0
+
+        gs = env._inner._adapter.raw_state
+        hand, jokers, levels = gs["hand"], gs.get("jokers", []), gs.get("hand_levels")
+        offered = [
+            fa.card_target for fa in env._action_table if fa.action_type == ActionType.PlayHand
+        ]
+        best_offered = max(
+            _cheap_hand_value([hand[i] for i in combo], jokers, levels)[0] for combo in offered
+        )
+        assert obs["lookahead"][1] == pytest.approx(log_scale(best_offered), rel=1e-5)
+
+    def test_terminal_observation_does_not_carry_a_stale_menu(self) -> None:
+        """A terminal step skips enumeration, so the block must be cleared
+        rather than left holding the previous step's menu."""
+        env = BalatroGymnasiumEnv(
+            adapter_factory=DirectAdapter, max_steps=200, lookahead_features=True
+        )
+        _, info = env.reset(options={"game_seed": "LOOKAHEAD_TERM"})
+        rng = np.random.default_rng(1)
+        obs = None
+        for _ in range(400):
+            legal = np.nonzero(env.action_masks())[0]
+            obs, _r, term, trunc, _info = env.step(int(rng.choice(legal)))
+            if term or trunc:
+                break
+        else:
+            pytest.skip("episode did not finish within the step budget")
+        assert obs is not None
+        assert np.all(obs["lookahead"] == 0.0)
+
+    def test_same_state_gives_identical_features(self) -> None:
+        a = self._into_selecting_hand(self._env(lookahead=True))
+        b = self._into_selecting_hand(self._env(lookahead=True))
+        assert np.array_equal(a["lookahead"], b["lookahead"])
+
+
 class TestStallDetection:
     """Known issue #15: a policy repeating an action that never changes
     chips/round/ante/hands_left/discards_left/dollars must be forced to

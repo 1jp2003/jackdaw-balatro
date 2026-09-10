@@ -363,6 +363,32 @@ class TestCenterKeyMapping:
         assert NUM_CENTER_KEYS == len(_CENTER_KEY_TO_ID)
         assert NUM_CENTER_KEYS > 0
 
+    def test_iter_center_keys_is_in_id_order(self):
+        from jackdaw.env.observation import center_key_id, iter_center_keys
+
+        keys = iter_center_keys()
+        assert len(keys) == NUM_CENTER_KEYS
+        assert [center_key_id(k) for k in keys] == list(range(1, NUM_CENTER_KEYS + 1))
+
+    def test_catalog_is_one_shared_id_space(self):
+        """An embedding table sized over the whole catalog can only ever be
+        reached by the prefix belonging to its entity type — the ``joker``
+        table has ~299 rows but only ~150 of them are jokers. Coverage
+        analyses that use the table height as the denominator badly
+        understate how much of the catalog an agent has actually seen (this
+        happened once; see docs/RUNS.md). Pin the shape of the catalog so
+        that assumption stays visible."""
+        from jackdaw.env.observation import iter_center_keys
+
+        keys = iter_center_keys()
+        jokers = [k for k in keys if k.startswith("j_")]
+        consumables = [k for k in keys if k.startswith("c_")]
+
+        assert len(jokers) < len(keys) / 1.5, "jokers should be a minority of the catalog"
+        assert len(consumables) < len(jokers)
+        # every entity type draws from this one space, so prefixes are disjoint
+        assert not set(jokers) & set(consumables)
+
 
 # ---------------------------------------------------------------------------
 # No NaN/Inf across random-agent steps

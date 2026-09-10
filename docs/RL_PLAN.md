@@ -32,10 +32,11 @@ validated against live Balatro through BalatroBot. Note this is currently
 |---|---|---|---|
 | Random | 1.00 | — | 0% |
 | **Heuristic** (exact one-step lookahead) | **2.75** | 7 | 0% |
-| Best PPO so far (run 15, lookahead) | 1.57 | 5 | 0% |
+| Best PPO so far (run 20, 1M steps + lookahead) | 1.87 | 6 | 0% |
 
 **The RL agent is not interesting until it beats the heuristic.** That gap is
-1.57 → 2.75 and is the number that matters.
+1.87 → 2.75 and is the number that matters — down from 1.42 → 2.75 at the
+start of this work.
 
 ---
 
@@ -48,22 +49,22 @@ validated against live Balatro through BalatroBot. Note this is currently
 | RAM | 32 GB | Not a limit |
 | OS | Train on Linux; validate on Windows | LiveBackend/BalatroBot is Windows-only |
 
-**Measured throughput: ~171 steps/sec single-env**, i.e. ~50 min per 500k-step
-run. That is down from ~524 steps/sec before the top-K action table, and the
-cost was deliberate — see `RUNS.md` "Throughput" for the full decomposition.
-The short version:
+**Measured throughput: ~160 fps single-env; ~485 fps with
+`--vec-env subproc --n-envs 8`** — a 500k-step run in ~17 min instead of ~52.
+See `RUNS.md` "Throughput" and "Parallel rollout collection". The short
+version:
 
-- **~92% of env wall-clock is `_enumerate_actions`.** The engine transition and
-  observation encoding are 0.35 ms of a ~5.7 ms step.
-- **The network is nearly free.** `BalatroExtractor` costs ~1.06 ms/step across
-  rollout and training; switching back to the default extractor would recover
-  ~19% and lose the entity embeddings.
+- **~91% of env wall-clock is `_enumerate_actions`** — the top-K ranking that
+  bought the 1.26 → 1.42 gain. Engine transition plus observation encoding is
+  0.30 ms of it.
+- **The network is nearly free per step, but it is the serial fraction.** It
+  runs in the main process, which is why 8 workers give 3.0x end-to-end
+  against 3.8x raw env scaling.
 - **fps carries ±70% exogenous variance on this machine** (runs 7 and 8 are the
   same code and differ 1.7×). Never read an fps change as a code signal without
   `scripts/bench_step.py` confirming it.
-
-With 6 `SubprocVecEnv` workers on Linux the enumeration parallelizes, which is
-the one change that would meaningfully move throughput.
+- **`n_steps` is per-env**: use `--rollout-steps` rather than raising
+  `--n-envs` alone, or the rollout multiplies by worker count.
 
 **Do not rent cloud compute.** The arithmetic doesn't justify it. If throughput
 later becomes the bottleneck, rent **CPU** (e.g. Hetzner CCX/AX, ~€40–60/mo for
@@ -79,10 +80,11 @@ wall-clock — the GPU is close to irrelevant. Do not treat it as a blocker.
 
 ## 3. Current state
 
-Twelve MaskablePPO runs. **Best: mean ante 1.42** (runs 11/12, both seeds),
-against the heuristic's 2.75. Full history in [`RUNS.md`](RUNS.md).
+Twenty MaskablePPO runs. **Best: mean ante 1.865** (run 20 — 1M steps with
+lookahead features), against the heuristic's 2.75. Full history in
+[`RUNS.md`](RUNS.md).
 
-The agent dies inside ante 1 about 63% of the time. Small blind at ante 1 needs
+The agent dies inside ante 1 about 58% of the time. Small blind at ante 1 needs
 300 chips; a near-random 5-card play scores 20–60, so four hands reaches ~150.
 Clearing the first blind requires actually selecting good hands, not sampling.
 
@@ -106,9 +108,14 @@ Clearing the first blind requires actually selecting good hands, not sampling.
 - **More survival will not unlock the embeddings.** That was the previous
   hypothesis and the exposure measurement contradicts it. The remaining gap is
   credit assignment, not data availability.
-- **The ceiling has not moved.** Max ante is still 3-4 across every run. Runs
-  11/12 clear the first blind far more often and go no deeper — which needs
-  jokers, economy, and shop play, none of which has been worked on.
+- **Training length moved the ceiling where nothing else had.** Every earlier
+  change improved the ante-1 clear rate and left the ceiling at 3-4. At 1M
+  steps run 20 reaches ante 6 with 48/200 episodes at ante 3+ (vs 14-25).
+  Confounded with the LR schedule — see `RUNS.md`.
+- **Lookahead features (§5.3 Level 2) help, inconsistently.** All four
+  lookahead runs beat both baselines; ablation attributes run 15's gain
+  causally to the feature content. Rescaling the block's field magnitudes to
+  make that consistent was tried and failed (runs 16/17).
 
 ### What is unresolved
 
@@ -154,13 +161,26 @@ Clearing the first blind requires actually selecting good hands, not sampling.
     override it — see fixed #14), and `balatro_env.py:98-100` uses the global
     `random` module for deck/stake choice. Only bites when `back_keys`/`stakes`
     have more than one entry, which no current run does.
+20. **The meta-jokers are registered but never actually exercised.**
+    `jackdaw/cli/scenarios/jokers.py` registers `j_four_fingers`,
+    `j_shortcut`, `j_smeared`, `j_splash` and `j_pareidolia` with
+    `hand_preset=None`, which plays a generic hand `[0..4]`. Those five are
+    exactly the jokers that change *which hands are detectable*
+    (`_META_JOKER_FLAGS` in `hand_eval.py`), and a generic hand usually
+    detects the same type with or without them — so the relaxed rules are
+    probably never hit against the live game. No category targets hand
+    detection at all.
+    **Fix**: scenarios that inject a deliberate 4-card flush plus an off-suit
+    card (Four Fingers), a gapped straight (Shortcut), and a mixed red/black
+    flush (Smeared), asserting the detected hand type. This is the live-game
+    counterpart to `tests/engine/test_hand_eval_refactor_golden.py`, which
+    covers the same paths offline but can only prove "unchanged", never
+    "matches real Balatro". Worth doing before the next `hand_eval` change
+    (defect #18's follow-ups: `is_suit`, enum attribute access).
 12. **Protocol drift.** `game_spec.py` types `GameEnvironment.step` as
     returning 6 values including a reward float; `BalatroEnvironment.step`
     returns 5. `runtime_checkable` only checks method existence, so this passes
     silently.
-17. **`SubprocVecEnv` never enabled.** `make_env`'s `worker_id` makes it
-    collision-safe (see fixed #3); only the `DummyVecEnv` → `SubprocVecEnv`
-    swap remains. Highest-leverage throughput change available (§2).
 
 ### Fixed
 
@@ -202,6 +222,17 @@ One-liners; the diagnosis that mattered is in `RUNS.md`.
     actions, so it survives a policy finding some other non-progressing loop.
     Validated on the run 5 checkpoint with no retraining: mean length 520.9 →
     30.0, throughput 16×, **mean ante unchanged** at 1.26.
+17. **`SubprocVecEnv` never enabled** — `--vec-env subproc` now wires it,
+    with `--rollout-steps` so raising `--n-envs` doesn't silently multiply the
+    rollout. 3.0x end-to-end at 8 workers.
+18. **`hand_eval.get_x_same` rebuilt the same rank grouping four times per
+    hand**, with an O(n²) scan — the hottest function in training. Now
+    `group_by_rank` computes it once (env 220 → 309 steps/sec). Engine change:
+    guarded by a 4,011-hand golden fixture, **still needs `jackdaw validate`**.
+19. **The benchmark suite was flaky and missed the hot path entirely** —
+    unseeded global `random` (4 of 5 runs failed), and `test_env_steps_per_second`
+    drives `DirectAdapter`, which never builds an action table. Seeded, plus
+    two benchmarks covering the real path.
 16. **`EntCoefSchedule` hardcoded** to `total_timesteps=500_000` regardless of
     the CLI flag; **`CheckpointCallback` wrote to a flat shared directory** so
     two runs reaching the same step count silently clobbered each other's
@@ -458,7 +489,10 @@ requires surviving ante 8.
 - [ ] 52-dim remaining-deck **count** histogram — blocked on §10's
       `BridgeAdapter` deck-composition question
 - [ ] Real joker rarity; drop `ability_extra` (defects 9, 10)
-- [ ] `SubprocVecEnv` × 6 on Linux (defect 17) — the throughput lever
+- [x] `SubprocVecEnv` (defect 17) — `--vec-env subproc --n-envs 8`, **3.0x
+      end-to-end** (160 → 485 fps; 500k run ~52 min → ~17 min). Worker game
+      diversity verified. `--rollout-steps` keeps the rollout constant so
+      worker count buys only wall-clock. See `RUNS.md`.
 
 **Exit:** `explained_variance` stops decaying; no NaN crashes; PPO approaches
 the heuristic. **Not met** — 1.42 vs 2.75.

@@ -46,6 +46,11 @@ PLAY_COMBO_BUDGET: int = 12
 _MIN_CARDINALITY_SLOTS: int = 2
 # Width of the optional lookahead observation channel (`_lookahead_features`).
 LOOKAHEAD_DIM: int = 8
+# Divisor on the block's one magnitude field (index 1). 1.0 = off.
+# Setting it to 10.0 to match the seven ratio fields was tried and did NOT
+# help — see `_lookahead_features`. Kept as a knob for further study, in the
+# same spirit as `BalatroExtractor.embed_init_std`.
+_LOOKAHEAD_VALUE_SCALE: float = 1.0
 
 
 def _stable_int_seed(text: str) -> int:
@@ -244,6 +249,41 @@ def _lookahead_features(
     Every field is bounded, and index 0 flags whether the rest is meaningful
     at all — outside SELECTING_HAND there is no menu, and "no data" must not
     be confusable with "a menu whose best play scores 0".
+
+    Field scale — tried balancing it, it did not help
+    -------------------------------------------------
+    `VecNormalize` runs with ``norm_obs=False``, so these values reach the
+    network raw and the first Linear computes ``sum(weight * value)``. A
+    field's units therefore act as an importance weight before any learning
+    happens. Measured on run 13's trained checkpoint, all eight dims carried
+    near-equal weights (~0.08-0.10), so raw magnitude decided everything:
+    index 1 contributed ``0.082 * 7.16 = 0.59`` to the pre-activation while
+    index 2 — "does my best play clear the blind", the most decision-relevant
+    number in the block — contributed ``0.104 * 0.33 = 0.034``. A 17x
+    imbalance in favour of the *least* useful field, purely from units.
+
+    The obvious inference — divide index 1 so every field lands near [0,1]
+    and let the network weight them by usefulness — was tested in runs 16/17
+    (`_LOOKAHEAD_VALUE_SCALE = 10.0`, both seeds, nothing else changed) and
+    **came out worse**: seed 1 fell 1.565 -> 1.450, seed 0 moved 1.460 ->
+    1.470, group mean 1.513 -> 1.460.
+
+    The ablation says why. Permuting the block cost unscaled seed 1 **0.19
+    ante**, but costs either rescaled run ~nothing — and the zeroed condition
+    went from 1.02 to ~1.27, meaning the block matters *less* overall after
+    rescaling, not differently. Shrinking the loud field did not hand its
+    influence to the quiet ones; it just made the whole block quieter, and
+    the network did not grow compensating weights within 500k steps (the LR
+    anneals to ~0).
+
+    This is the same result, and the same wrong reasoning, as
+    `BalatroExtractor.embed_init_std` (run 10): "this input is
+    disproportionately loud, so quieting it will let the useful signal
+    through" has now failed twice in this codebase. Both times, reducing an
+    input's magnitude reduced its total contribution rather than rebalancing
+    it. Treat that inference as suspect here; if field scale is worth
+    attacking, `VecNormalize(norm_obs=True)` addresses it globally and is a
+    different experiment.
     """
     out = np.zeros(LOOKAHEAD_DIM, dtype=np.float32)
     if not scored:
@@ -259,7 +299,7 @@ def _lookahead_features(
     hands_left = int(gs.get("current_round", {}).get("hands_left", 0))
 
     out[0] = 1.0
-    out[1] = log_scale(best)
+    out[1] = log_scale(best) / _LOOKAHEAD_VALUE_SCALE
     if remaining > 0:
         # "Does my single best offered play finish this blind right now?"
         out[2] = min(best / remaining, 2.0) / 2.0

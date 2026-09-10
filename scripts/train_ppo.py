@@ -13,7 +13,9 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import os
 import time
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -22,7 +24,12 @@ import torch
 from sb3_contrib import MaskablePPO
 from stable_baselines3.common.callbacks import BaseCallback, CheckpointCallback
 from stable_baselines3.common.monitor import Monitor
-from stable_baselines3.common.vec_env import DummyVecEnv, VecCheckNan, VecNormalize
+from stable_baselines3.common.vec_env import (
+    DummyVecEnv,
+    SubprocVecEnv,
+    VecCheckNan,
+    VecNormalize,
+)
 
 from jackdaw.env.game_interface import DirectAdapter
 from jackdaw.env.gymnasium_wrapper import BalatroGymnasiumEnv
@@ -332,6 +339,38 @@ def make_env(
     )
 
 
+def derive_n_steps(rollout_steps: int, n_envs: int) -> int:
+    """Per-env ``n_steps`` that keeps the TOTAL rollout at *rollout_steps*.
+
+    SB3's ``n_steps`` is per environment: the rollout buffer holds
+    ``n_steps * n_envs`` transitions. Raising ``--n-envs`` with ``n_steps``
+    fixed therefore multiplies the rollout, which changes how many
+    minibatches each update sees and how stale the oldest data in it is —
+    that is a hyperparameter change, not a speedup, and it would make a
+    parallel run incomparable to runs 11-17 for reasons having nothing to do
+    with parallelism (docs/RL_PLAN.md §8 rule 1).
+    """
+    return max(rollout_steps // n_envs, 1)
+
+
+def make_worker_env(seed: int, max_steps: int, worker_id: int, lookahead: bool) -> Monitor:
+    """One training worker, Monitor-wrapped.
+
+    Module-level and taking only plain arguments so it pickles under
+    ``SubprocVecEnv``. Windows spawns rather than forks, which re-imports
+    this module in each child — a closure over ``args`` would rely on
+    cloudpickle's handling of local functions, and there is no reason to.
+
+    Monitor must wrap each sub-env *here*, not around the VecEnv: SB3's
+    ``_wrap_env`` only inserts Monitor when the env isn't already a VecEnv,
+    so wrapping later silently drops ``rollout/ep_rew_mean`` and
+    ``ep_len_mean`` (known issue #6).
+    """
+    return Monitor(
+        make_env(seed=seed, max_steps=max_steps, worker_id=worker_id, lookahead=lookahead)
+    )
+
+
 class EntCoefSchedule(BaseCallback):
     def __init__(self, initial: float, final: float, total_timesteps: int):
         super().__init__()
@@ -355,6 +394,25 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--max-steps", type=int, default=2_000)
     parser.add_argument("--n-envs", type=int, default=1)
+    parser.add_argument(
+        "--vec-env",
+        choices=["dummy", "subproc"],
+        default="dummy",
+        help="'dummy' (default) steps every env in this process. 'subproc' "
+        "runs each in its own process, which is the only way to parallelize "
+        "the action-table ranking — ~91%% of env wall-clock (docs/RUNS.md, "
+        "'Throughput'). Pointless at --n-envs 1, where it only adds IPC.",
+    )
+    parser.add_argument(
+        "--rollout-steps",
+        type=int,
+        default=4096,
+        help="TOTAL env steps per PPO update, across all workers. SB3's "
+        "n_steps is per-env, so leaving it fixed while raising --n-envs "
+        "silently multiplies the rollout (and thus the batch count per "
+        "update) by n_envs — a different experiment, not a faster one. This "
+        "holds the rollout constant instead: n_steps = rollout_steps // n_envs.",
+    )
     parser.add_argument(
         "--checkpoint-freq",
         type=int,
@@ -413,22 +471,28 @@ def main() -> None:
     log_path = Path(args.log_dir)
     log_path.mkdir(parents=True, exist_ok=True)
 
-    # Monitor must wrap each sub-env directly: SB3's _wrap_env only inserts
-    # Monitor when the env isn't already a VecEnv, so wrapping after
-    # DummyVecEnv/VecNormalize silently drops rollout/ep_rew_mean and
-    # ep_len_mean (known issue #6).
-    def _make_worker_env(worker_id: int) -> Monitor:
-        return Monitor(
-            make_env(
-                seed=args.seed,
-                max_steps=args.max_steps,
-                worker_id=worker_id,
-                lookahead=args.lookahead,
-            )
+    n_steps = derive_n_steps(args.rollout_steps, args.n_envs)
+    effective_rollout = n_steps * args.n_envs
+    print(
+        f"vec_env={args.vec_env} n_envs={args.n_envs} "
+        f"n_steps={n_steps}/env -> rollout {effective_rollout} steps/update"
+    )
+    if effective_rollout != args.rollout_steps:
+        print(
+            f"  note: {args.rollout_steps} does not divide evenly by "
+            f"{args.n_envs}; rollout is {effective_rollout}, not "
+            f"{args.rollout_steps}. Powers of two divide cleanly."
         )
+    if args.vec_env == "subproc" and args.n_envs == 1:
+        print("  note: --vec-env subproc with one env only adds IPC overhead.")
 
+    env_fns = [
+        partial(make_worker_env, args.seed, args.max_steps, i, args.lookahead)
+        for i in range(args.n_envs)
+    ]
+    vec_env_cls = SubprocVecEnv if args.vec_env == "subproc" else DummyVecEnv
     env = VecNormalize(
-        DummyVecEnv([lambda i=i: _make_worker_env(i) for i in range(args.n_envs)]),
+        vec_env_cls(env_fns),
         norm_obs=False,
         norm_reward=True,
         gamma=0.99,
@@ -456,17 +520,20 @@ def main() -> None:
         tensorboard_log=str(log_path),
         learning_rate=lambda p: 3e-4 * p,
         ent_coef=0.005,
-        n_steps=4096,
+        n_steps=n_steps,
         batch_size=256,
         clip_range=0.15,
         clip_range_vf=0.2,
         target_kl=0.02,
         policy_kwargs=policy_kwargs,
     )
-    # One timestamp for every artifact this invocation produces, so a run's
+    # One id for every artifact this invocation produces, so a run's
     # checkpoints and its final model live together and can't be confused
-    # with another run's.
-    run_id = time.strftime("%Y%m%d_%H%M%S")
+    # with another run's. The pid matters: a bare second-resolution timestamp
+    # collides when two runs are launched together (e.g. two seeds in
+    # parallel), which would silently recreate the very clobbering that
+    # defect #16 was about.
+    run_id = f"{time.strftime('%Y%m%d_%H%M%S')}_{os.getpid()}"
     run_dir = log_path / "checkpoints" / run_id
 
     print(f"Training for {args.total_timesteps} timesteps...")

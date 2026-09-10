@@ -35,6 +35,11 @@ Conventions:
 | 13 | Run 11 + `--lookahead` (§5.3 Level 2 observation features) | **1.460** | 75/200 | 112 | 500k, no crash — inside the noise floor |
 | 14 | Run 13, `--seed 1` | **1.580** @350k | 86/200 | 103 | **crashed ~364,544** — root-caused, see below |
 | 15 | Run 14 retried after the `Simplex()` fix | **1.565** | 85/200 | 142 | 500k, no crash — first run to reach **ante 5** |
+| 16 | Run 13 + `_LOOKAHEAD_VALUE_SCALE=10` (balance the block's field scales) | **1.470** | 79/200 | 129 | 500k, no crash — no gain |
+| 17 | Run 16, `--seed 1` | **1.450** | 79/200 | 118 | 500k, no crash — **worse than run 15's 1.565** |
+| 18 | Run 15 config, `--vec-env subproc --n-envs 8` | **1.535** | 89/200 | 505 | 500k in **16.6 min** — parallelism does not shift results |
+| 19 | Run 18 at **1M steps** | **1.620** | 97/200 | 412 | 1M in 41 min, no crash |
+| 20 | Run 19, `--seed 0` | **1.865** | 102/200 | 461 | 1M in 36 min — **best result so far**, max ante 6 |
 
 Reference points: random 1.00, **heuristic 2.75** (the bar to beat), max
 possible 8.
@@ -476,7 +481,56 @@ Run 13 did not move (−0.025) and run 15 moved a lot (−0.19). Reporting only
 run 13 would have concluded "wired but unused" — which is what the first pass
 here did conclude, before run 15 existed.
 
-### Mechanism: the block is dominated by its least useful dimension
+## Runs 16 and 17 — balancing the block's field scales: rejected
+
+`_LOOKAHEAD_VALUE_SCALE = 10.0`, both seeds, nothing else changed. Since
+training is deterministic, this is as clean an A/B as this project gets: the
+same two seeds, one variable.
+
+| Variant | Seed 0 | Seed 1 | Group mean | Permutation Δ |
+|---|---|---|---|---|
+| no lookahead (11, 12) | 1.420 | 1.420 | 1.420 | — |
+| **unscaled** (13, 15) | 1.460 | **1.565** | **1.513** | −0.025, **−0.19** |
+| rescaled (16, 17) | 1.470 | 1.450 | 1.460 | −0.015, +0.075 |
+
+**The hypothesis was wrong.** Seed 1 lost 0.115 (1.565 → 1.450); seed 0
+gained 0.01. Group mean fell 1.513 → 1.460. Distributions confirm it is not
+a mean artifact: run 15 reached ante 5 and put 23 episodes at ante 3, while
+both rescaled runs top out at ante 3 with 11-15 there.
+
+**The ablation says why, and it is the interesting part.** Permuting the
+block costs unscaled seed 1 **0.19 ante**, but costs either rescaled run
+about nothing (−0.015 and *+0.075*, i.e. noise). Meanwhile the *zeroed*
+condition rose from 1.02 to ~1.27. Read together: after rescaling, the block
+matters **less overall**, not differently. Shrinking the loud field did not
+hand its influence to the quiet ones — it made the whole block quieter, and
+the network never grew compensating weights on the ratio fields within 500k
+steps (the LR anneals to ~0 by then).
+
+Default reverted to `1.0`; the knob is kept for study, and
+`test_value_scale_knob_is_honored` keeps it working.
+
+### The generalizable lesson: this reasoning has now failed twice
+
+The prediction was: *"index 1 is 17x louder than the most decision-relevant
+field purely because of its units, so quieting it will let the useful signal
+through."* It is the same prediction, and the same failure, as run 10's
+`embed_init_std=0.1`: *"an untrained N(0,1) embedding row is a loud random
+vector drowning the real features, so shrinking it will help."*
+
+Both times, reducing an input's magnitude reduced its **total contribution**
+rather than **rebalancing** contributions within the group. Both times the
+measured result was worse than leaving it alone. Two independent instances in
+this codebase is enough to treat "quiet the loud input" as a suspect
+inference here rather than an obvious improvement.
+
+If field scale is genuinely worth attacking, the mechanism that actually does
+what the intuition wants is `VecNormalize(norm_obs=True)`, which standardizes
+every observation dimension by running statistics instead of hand-dividing
+one of them. That is a different, global experiment — it would touch all 235
+global dims plus every entity feature, and invalidate every checkpoint.
+
+### Mechanism behind the imbalance (measured, still true)
 
 First-layer weights of `global_mlp` on the trained checkpoint, mean |w| per
 input column:
@@ -499,10 +553,13 @@ Contribution to the pre-activation is weight × value:
 - dim 2: 0.104 × 0.33 ≈ **0.034**
 
 A ~17× gap, in favour of the one dimension carrying the least decision-
-relevant information. The block is effectively a magnitude channel with seven
-vestigial ratios attached, which is a plausible reason the informative dims
-never got traction — and a cheap, isolated thing to test next: rescale dim 1
-into [0,1] (e.g. `log2(1+best)/16`) and change nothing else.
+relevant information.
+
+The measurement above is solid and still stands. **The inference drawn from
+it did not survive contact with runs 16/17** — "the block is a magnitude
+channel with seven vestigial ratios attached, so rescaling dim 1 should let
+the informative dims get traction" was tested directly and came out worse.
+See "Runs 16 and 17" above before reaching for this again.
 
 Reproduce: `scripts/lookahead_ablation.py <checkpoint> 200`.
 
@@ -617,6 +674,11 @@ observation. `explained_variance` decay is that limit showing up as a crash.
 
 ## Throughput: where the wall-clock goes
 
+> **Superseded in part.** The decomposition below is what motivated the
+> `hand_eval.group_by_rank` optimization; see "Optimizing the hot path"
+> underneath it for the post-fix numbers (enumeration 4.26 → 2.94 ms/step,
+> env 220 → 309 steps/sec).
+
 Training fps fell from run 5's 524 to runs 11/12's ~171. Decomposed by direct
 measurement (`uv run scripts/bench_step.py`, single-threaded torch, this
 machine; ±10% between invocations):
@@ -659,3 +721,225 @@ Three things follow:
 If throughput becomes the constraint, the target is unambiguous: cheapen or
 cache `_enumerate_actions`, or run `SubprocVecEnv` workers so the enumeration
 parallelizes. Optimizing the network would recover at most ~16%.
+
+---
+
+## Optimizing the hot path: `hand_eval.group_by_rank`
+
+The section above said the target was unambiguous. Profiling inside
+`_enumerate_actions` (`cProfile`; py-spy is not installed and has never
+attached in this sandbox) found it:
+
+| Function | calls | tottime | cumtime |
+|---|---|---|---|
+| **`get_x_same`** | 533,668 | **2.12 s (21%)** | **3.28 s (33%)** |
+| `evaluate_hand` | 133,417 | 1.06 s | 8.34 s (84%) |
+| `Card.is_suit` | 826,900 | 0.63 s | 1.17 s |
+| enum `__get__` | 2,639,721 | 0.56 s | 0.81 s |
+
+`evaluate_poker_hand` calls `get_x_same` **four times** per hand (sizes 5, 4,
+3, 2), and each call rebuilt the same rank grouping from scratch with an
+O(n²) scan. Fix: group once (`group_by_rank`), filter four times.
+
+| | Before | After |
+|---|---|---|
+| `_enumerate_actions` | 4.26 ms/step | **2.94 ms/step** |
+| Env throughput (single, no network) | 220 steps/sec | **309 steps/sec** |
+
+A second pass mattered nearly as much as the first: the initial rewrite still
+walked `range(14, 0, -1)` per size, i.e. 56 dict probes for a hand holding at
+most 5 distinct ranks. Sorting the handful of real groups once instead took
+enumeration from 3.52 → 2.94 ms.
+
+### Doing this safely against the bit-exactness rule
+
+`hand_eval.py` is engine code, where `CLAUDE.md` requires `jackdaw validate`
+— which needs a live BalatroBot server. Three offline steps stood in for it:
+
+1. **Derived** the equivalence. The old code scanned `i` from `len-1` down to
+   0 overwriting `vals[card_id]`, so the surviving group for a rank was the
+   one built at the *smallest* matching `i` — which is just the matching
+   cards in ascending index order.
+2. **Differential-tested** the claim: 0 mismatches over 80,000 comparisons.
+3. **Generated a golden fixture first** —
+   `tests/fixtures/hand_eval_refactor_golden.json`, 4,011 randomized hands
+   biased toward what a grouping rewrite breaks (empty hands, five of a kind,
+   flush houses, wheel straights, wild/stone), recording detected hand,
+   scoring-card *positions*, and full `poker_hands` decomposition including
+   group order. `tests/engine/test_hand_eval_refactor_golden.py`.
+
+The Lua oracle test says "matches the source"; the golden says "unchanged by
+the refactor". **`jackdaw validate` is still the outstanding gate.**
+
+**Next targets, not taken:** `Card.is_suit` (~8%) and enum attribute access
+(~7%). Both have far more semantic surface than the grouping change (debuff,
+wild, smeared, stone) for a fraction of the payoff. Do them one at a time,
+each with its own validate cycle — stacking unvalidated engine changes makes
+a bit-exactness failure impossible to bisect.
+
+### The benchmarks did not cover any of this
+
+`tests/benchmarks/test_env_bench.py::test_env_steps_per_second` drives
+`DirectAdapter` directly, so it never builds an action table — it asserted
+">500 steps/sec" while real training ran at 220. The most expensive component
+in the pipeline had no benchmark at all.
+
+Worse, the benchmark suite was **flaky on unchanged code**: five consecutive
+runs gave 5-pass, 2-fail, 1-fail, 1-fail, 1-fail. `_collect_game_states` drew
+from the unseeded global `random`, so each run walked a different action
+sequence, and any walk that opened a booster pack containing a targeted
+consumable handed the engine a `PickPackCard` with no targets
+(`IllegalActionError: c_sun requires between 1 and 3 target card(s)`). This
+briefly produced a false signal — stashing the engine change made the suite
+pass, which looked like evidence the change was at fault. It wasn't; five
+repeat runs showed it was luck. Same class as known issue #11.
+
+Now seeded and tolerant of unfillable marker actions (6/6 deterministic), with
+two new benchmarks covering the real path: `test_gym_env_steps_per_second`
+(>120/sec) and `test_action_table_enumeration_latency` (<8 ms mean).
+
+---
+
+## Parallel rollout collection (`--vec-env subproc`)
+
+`n_envs > 1` had never actually been run in this project — defect #3 (every
+worker replaying the same seed sequence) was fixed defensively, never
+exercised. It holds: **4/4 distinct worker observations** under both
+`DummyVecEnv` and `SubprocVecEnv`.
+
+Raw env throughput, no network (`scratchpad/bench_subproc.py`):
+
+| Workers | steps/sec | vs 1 |
+|---|---|---|
+| 1 (dummy) | 284 | 1.00x |
+| 4 | 699 | 2.46x |
+| 6 | 914 | 3.21x |
+| 8 | 1089 | 3.83x |
+
+End-to-end training fps, 120k steps each, back-to-back on an idle machine:
+
+| Config | fps | vs baseline | 500k run |
+|---|---|---|---|
+| dummy, 1 | 160 | 1.00x | ~52 min |
+| subproc, 4 | 355 | 2.22x | ~23 min |
+| subproc, 6 | 428 | 2.68x | ~20 min |
+| **subproc, 8** | **485** | **3.03x** | **~17 min** |
+
+End-to-end gain (3.0x) is below raw env scaling (3.8x) because the policy
+forward/backward runs in the main process and is not parallelized — it is
+the serial fraction. 8 workers still beat 6 on a 6C/12T box, and 4096
+divides evenly by 8, so there is no rollout rounding.
+
+### The trap: `n_steps` is per environment
+
+SB3's rollout buffer holds `n_steps * n_envs` transitions. Raising
+`--n-envs` with `n_steps` fixed multiplies the rollout — with 8 workers,
+4096 becomes 32,768, changing the minibatch count per update and the
+staleness of the oldest data in it. That is a hyperparameter change
+disguised as a speedup, and it would have made every parallel run
+incomparable to runs 11-17 for reasons unrelated to parallelism.
+
+`--rollout-steps` (total, default 4096) now derives
+`n_steps = rollout_steps // n_envs`, so worker count buys wall-clock and
+nothing else. `tests/env/test_vec_env_setup.py` pins the invariant.
+
+### Holding the rollout constant is necessary, not sufficient
+
+A parallel run is still **not** bit-identical to a serial one:
+
+- each worker contributes a shorter contiguous trajectory (512 steps at
+  `n_envs=8`, versus 4096), so GAE bootstrapping at rollout boundaries
+  differs;
+- batch composition changes — 8 concurrent games instead of one sequential
+  stream. That is usually *better* for PPO, but it is a change.
+
+So the speedup got its own validation: **run 18 replicates run 15's exact
+configuration (seed 1, `--lookahead`) with `--n-envs 8`.**
+
+| Run | Collection | Mean ante | Past ante 1 | Distribution | Wall clock |
+|---|---|---|---|---|---|
+| 15 | serial, 1 env | 1.565 | 85/200 | `{1:115, 2:60, 3:23, 4:1, 5:1}` | ~59 min |
+| 18 | **subproc, 8 envs** | **1.535** | **89/200** | `{1:111, 2:71, 3:18}` | **16.6 min** |
+
+**Parallel collection does not shift results.** The means differ by 0.03
+against a 0.13 noise floor, and run 18 actually clears ante 1 slightly *more*
+often (89 vs 85). Run 15's higher max ante (5 vs 3) is two single episodes in
+the tail, not a distributional difference. Parallel runs are comparable to
+serial ones, and `--vec-env subproc --n-envs 8` is the default worth using.
+
+One caveat for anyone reading the ablation column: run 18's policy conditions
+on the lookahead block only weakly (permuted costs it 0.045, versus run 15's
+0.19) despite scoring nearly the same. Across all five lookahead runs, strong
+conditioning has shown up exactly once. Whatever makes a run learn to exploit
+these features, it is not something any change so far has controlled.
+
+
+---
+
+## Runs 19 and 20 — 1M steps: the ceiling finally moves
+
+Runs 18's configuration at `--total-timesteps 1000000`, both seeds, 8
+parallel workers. No crashes. 41 and 36 minutes respectively — the same work
+would have taken ~3.5 hours before this session's throughput fixes.
+
+| Run | Steps | Seed | Mean ante | Past ante 1 | **Ante 3+** | Max | Distribution |
+|---|---|---|---|---|---|---|---|
+| 13 | 500k | 0 | 1.460 | 75/200 | 14 | 4 | `{1:125, 2:61, 3:11, 4:3}` |
+| 15 | 500k | 1 | 1.565 | 85/200 | 25 | 5 | `{1:115, 2:60, 3:23, 4:1, 5:1}` |
+| 18 | 500k | 1 | 1.535 | 89/200 | 18 | 3 | `{1:111, 2:71, 3:18}` |
+| **19** | **1M** | 1 | **1.620** | 97/200 | 24 | 4 | `{1:103, 2:73, 3:21, 4:3}` |
+| **20** | **1M** | 0 | **1.865** | **102/200** | **48** | **6** | `{1:98, 2:54, 3:31, 4:12, 5:4, 6:1}` |
+
+Group means: **1.743 at 1M against 1.520 at 500k, +0.22** on a 0.13 noise
+floor, and both 1M runs beat all three 500k runs.
+
+**The ante 3+ column is the real story.** Every earlier change moved the
+ante-1 clear rate and left the ceiling alone — the agent got better at the
+first blind and no better at going deep. Run 20 puts **48 episodes at ante 3
+or beyond** against 14-25 before, reaches ante 6, and is the first run since
+run 5 to see ante 5+ more than once. That is the ceiling moving, not just
+the floor.
+
+Seed ordering also flipped: seed 0 was the weaker seed at 500k (1.460 vs
+1.565) and the stronger at 1M (1.865 vs 1.620). Treat per-seed rankings as
+noise, not character.
+
+### This is confounded with the learning-rate schedule
+
+**A 1M run is not "500k plus more."** SB3 schedules `learning_rate` and
+`clip_range` on fraction of *declared* `total_timesteps`, so runs 19/20 had a
+higher LR than runs 15/18 at every matching step. Run 9 was previously
+misread as evidence about step count for exactly this reason.
+
+So what these runs answer is *"is a 1M run with its natural schedule better
+than a 500k run with its natural schedule?"* — practically the question worth
+asking, and the answer is a clear yes. What they do **not** isolate is step
+count alone. Anyone wanting that needs an absolute-step LR schedule, which is
+its own change requiring its own validation (§7).
+
+### Ablation: the best run is also the one using the features
+
+| Run | intact | permuted | Δ | zeroed |
+|---|---|---|---|---|
+| 19 (1M, seed 1) | 1.620 | 1.560 | −0.06 | 1.275 |
+| **20 (1M, seed 0)** | **1.865** | **1.645** | **−0.22** | 1.205 |
+
+Run 20 conditions on the lookahead block more strongly than any run so far
+(run 15's −0.19 was the previous high). Note its permuted score (1.645) still
+beats every 500k run, so its advantage is partly extra training and partly
+learned feature use — the two are separable here and both are real.
+
+Across seven lookahead runs, strong conditioning has now appeared in the two
+best runs (15 and 20) and weakly elsewhere. That is suggestive, not
+established — run 18 scored 1.535 with a −0.045 ablation, so it is not a
+clean rule.
+
+### Found while doing this: the Simplex guard was missing from the ablation script
+
+`scripts/lookahead_ablation.py` never called
+`disable_distribution_validation()` — the fix had gone into `train_ppo.py`
+and `eval_ppo.py` only. It ran three 200-episode sweeps against run 20 and
+died on the same float32 tolerance failure this session root-caused. Fixed.
+Worth noting the shape of the mistake: the diagnostic that proved the bug was
+itself vulnerable to it, and only a checkpoint that happened to sit near the
+tolerance exposed the gap.

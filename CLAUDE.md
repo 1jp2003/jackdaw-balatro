@@ -16,6 +16,7 @@ uv sync --dev                                # install with dev deps (test, lint
 uv sync --extra train                        # add training deps (torch, sb3, tensorboard)
 python scripts/train_ppo.py --total-timesteps 500000
 python scripts/train_ppo.py --total-timesteps 500000 --lookahead   # + §5.3 L2 features
+python scripts/train_ppo.py --total-timesteps 500000 --vec-env subproc --n-envs 8  # ~3x faster
 tensorboard --logdir runs/balatro_ppo
 pytest                                       # tests
 pytest --cov=jackdaw                         # with coverage
@@ -99,26 +100,26 @@ code cross-platform.
 
 ## Current state
 
-MaskablePPO on `MultiInputPolicy`, Red Deck / White Stake. Twelve runs;
+MaskablePPO on `MultiInputPolicy`, Red Deck / White Stake. Twenty runs;
 per-run detail in `docs/RUNS.md`, the plan in `docs/RL_PLAN.md`.
 
 | Agent | Mean ante | Max ante | Win rate |
 |---|---|---|---|
 | Random | 1.00 | — | 0% |
 | **Heuristic** (exact one-step lookahead) | **2.75** | 7 | 0% |
-| **Best PPO** (run 15, lookahead, seed 1) | **1.57** | 5 | 0% |
+| **Best PPO** (run 20: 1M steps, lookahead) | **1.87** | 6 | 0% |
 
 The heuristic is `HeuristicAgent` (`uv run scripts/eval_agent.py --agent
 heuristic --episodes 200`) and is the number PPO has to beat. It doesn't yet.
 
-- **The action table was the bottleneck, and fixing it is the only change
-  that has produced a confirmed gain.** A deterministic top-K menu (issue #2)
-  moved 1.26 → 1.42 across two seeds, ante-1 clear rates 73/70 per 200 vs a
-  pre-fix 11-38. Non-overlapping on both metrics with the within-group spread
-  collapsed — the tightness is what makes it convincing, not the size.
-- **The ceiling did not move.** Max ante is still 3-4 across every run. Better
-  at clearing the first blind, no better at going deep — that needs jokers,
-  economy and shop play, none of which has been worked on.
+- **Three changes have produced confirmed gains, in order of discovery:**
+  the deterministic top-K action table (issue #2, 1.26 → 1.42 across two
+  seeds), the lookahead observation features (§5.3 L2, → ~1.52), and simply
+  **training for 1M steps instead of 500k** (→ 1.74 group mean).
+- **Only the last one moved the ceiling.** Every earlier change raised the
+  ante-1 clear rate and left max ante at 3-4. Run 20 reaches **ante 6** with
+  48/200 episodes at ante 3+ (vs 14-25 at 500k). Going deeper still needs
+  jokers, economy and shop play, none of which has been worked on.
 - **Stop tuning the embedding path.** Four `balatro`-extractor runs average
   ~1.14 vs the default extractor's 1.26: all-entity pooling (run 6, 1.00,
   broken), fixed pooling (runs 7/8, 1.26/1.13), small init (run 10, 1.07).
@@ -146,6 +147,13 @@ heuristic --episodes 200`) and is the number PPO has to beat. It doesn't yet.
   `Distribution.set_default_validate_args(False)` in `train_ppo.py` and
   `eval_ppo.py`; regression tests in `tests/env/test_action_distribution.py`.
   This retires "critic blowup" as the explanation for anything after run 4.
+- **1M steps beats 500k, and it is the first change to move the ceiling.**
+  Runs 19/20: 1.620/1.865 vs the 500k group's 1.460/1.535/1.565 (+0.22 on a
+  0.13 noise floor, both above all three). Run 20 puts **48/200 episodes at
+  ante 3+** against 14-25 before, and reaches ante 6. **Confounded with the LR
+  schedule** — SB3 decays on fraction of *declared* total steps, so a 1M run
+  is not a 500k run extended. It answers "is 1M with its natural schedule
+  better", not "does step count alone help".
 - **Lookahead features (§5.3 Level 2) give a real but inconsistent gain.**
   At 500k: 1.46/1.565 (lookahead) vs 1.420/1.420 (without) — non-overlapping
   on mean and clear rate, group gap +0.09, and run 15 is the first run to
@@ -155,16 +163,35 @@ heuristic --episodes 200`) and is the number PPO has to beat. It doesn't yet.
   baseline), so its gain is causally attributable to the feature content.
   Run 13 barely reacts (−0.025). What varies across seeds is whether the
   policy *learns to use* the features, not whether they carry signal.
-  Next lever: dim 1 (`log2(best)`, mean 7.16) outweighs the decision-relevant
-  ratio dims by ~17× in raw pre-activation contribution — `norm_obs=False`,
-  so raw scale matters. Rescaling it is a cheap isolated test.
+  All four lookahead runs (1.46, 1.565, 1.47, 1.45) beat both baselines
+  (1.42, 1.42), so the direction is consistent even where margins are thin.
+- **Rescaling the lookahead block's magnitude field did not help (runs
+  16/17).** Dim 1 outweighs the decision-relevant ratio dims ~17× in raw
+  pre-activation contribution, so dividing it by 10 looked obvious. Result:
+  seed 1 fell 1.565 → 1.450, seed 0 moved 1.460 → 1.470. Ablation shows why —
+  the block ended up mattering *less overall* (zeroed 1.02 → ~1.27) rather
+  than differently. Default reverted to 1.0; knob kept.
+  **This inference has now failed twice** (see also `embed_init_std`, run 10):
+  "quiet the disproportionately loud input" reduces total contribution rather
+  than rebalancing it. Treat it as suspect here. The mechanism that does what
+  the intuition wants is `VecNormalize(norm_obs=True)` — global, and a
+  different experiment.
 - **`--total-timesteps` also changes the LR schedule.** SB3 schedules
   `learning_rate`/`clip_range` on fraction of *declared* total steps, so a
   longer run is not a clean extension of a shorter one.
-- **Throughput ~171 steps/sec** (~50 min per 500k run), down from 524 before
-  the top-K table. ~92% of env wall-clock is `_enumerate_actions`; the network
-  is <20%. fps varies ±70% between runs on identical code — never read it as
-  a code signal without `uv run scripts/bench_step.py`.
+- **Throughput: ~160 fps single-env, ~485 with `--vec-env subproc --n-envs 8`**
+  (500k run: ~52 min → ~17 min). Two independent wins: `hand_eval.group_by_rank`
+  shares the rank grouping across sizes (env 220 → 309 steps/sec), and parallel
+  workers give a further 3.0x end-to-end. ~91% of env wall-clock is still
+  `_enumerate_actions`. fps varies ±70% between runs on identical code — never
+  read it as a code signal without `uv run scripts/bench_step.py`.
+- **`n_steps` is per-env in SB3.** Use `--rollout-steps` (total) rather than
+  raising `--n-envs` alone, or the rollout silently multiplies by worker count
+  — a hyperparameter change, not a speedup.
+- **Parallel collection is validated, not assumed.** Run 18 replicated run
+  15's exact config with 8 workers: 1.535 vs 1.565 (inside the 0.13 noise
+  floor) with a slightly *better* ante-1 clear rate, in 16.6 min instead of
+  ~59. Parallel and serial runs are comparable.
 
 ---
 

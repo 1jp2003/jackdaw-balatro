@@ -140,6 +140,43 @@ def get_straight(
     return [t]
 
 
+def group_by_rank(hand: list[Card]) -> list[tuple[int, list[Card]]]:
+    """Group *hand* by rank id, descending rank, each group in hand order.
+
+    Extracted from ``get_x_same`` so the grouping is computed once per hand
+    instead of once per group size. ``evaluate_poker_hand`` asks for sizes
+    5, 4, 3 and 2 on the same cards, so the original rebuilt this four times
+    over — and did so with an O(n^2) scan. Under the action-table ranking
+    (docs/RUNS.md, "Throughput") that made ``get_x_same`` the single hottest
+    function in training.
+
+    Equivalent to the group the old code produced: it scanned ``i`` from
+    ``len-1`` down to 0 overwriting ``vals[card_id]``, so the surviving group
+    for a rank was the one built at the *smallest* matching ``i`` — that is
+    ``[hand[i]]`` followed by every other match in ascending ``j``, which is
+    simply the matching cards in ascending index order. Locked by
+    ``tests/engine/test_hand_eval_refactor_golden.py`` (4,011 hands,
+    comparing group contents *and* order).
+    """
+    groups: dict[int, list[Card]] = {}
+    for card in hand:
+        groups.setdefault(card.get_id(), []).append(card)
+    # Sorted descending here rather than re-walking `range(14, 0, -1)` per
+    # size: a played hand holds at most 5 distinct ranks, so ordering a
+    # handful of entries once beats 14 dict probes four times over.
+    # Ranks outside 1..14 are dropped, matching the original's walk — stone
+    # cards report a fixed -1 placeholder and were never returned.
+    return sorted(
+        ((rank_id, cards) for rank_id, cards in groups.items() if 1 <= rank_id <= 14),
+        key=lambda item: -item[0],
+    )
+
+
+def _x_same_from_groups(num: int, ordered: list[tuple[int, list[Card]]]) -> list[list[Card]]:
+    """Select rank groups of exactly *num* cards, highest rank first."""
+    return [cards for _rank_id, cards in ordered if len(cards) == num]
+
+
 def get_x_same(num: int, hand: list[Card]) -> list[list[Card]]:
     """Find all groups of exactly *num* cards sharing the same rank.
 
@@ -147,28 +184,12 @@ def get_x_same(num: int, hand: list[Card]) -> list[list[Card]]:
 
     Returns groups ordered by rank descending (highest first).
     Each group contains exactly *num* cards.
+
+    Note: ``evaluate_poker_hand`` does not call this — it groups once via
+    ``group_by_rank`` and filters four times. This remains the standalone
+    entry point for callers that need a single size.
     """
-    # vals[id] = list of cards with that id, only if count == num
-    vals: dict[int, list[Card]] = {}
-
-    # get_id is pure (stone cards return a fixed -1 placeholder), so it can
-    # be hoisted out of the O(n^2) comparison loop.
-    ids = [c.get_id() for c in hand]
-    for i in range(len(hand) - 1, -1, -1):
-        curr = [hand[i]]
-        card_id = ids[i]
-        for j in range(len(hand)):
-            if ids[i] == ids[j] and i != j:
-                curr.append(hand[j])
-        if len(curr) == num:
-            vals[card_id] = curr
-
-    # Return in descending rank order
-    ret: list[list[Card]] = []
-    for rank_id in range(14, 0, -1):
-        if rank_id in vals:
-            ret.append(vals[rank_id])
-    return ret
+    return _x_same_from_groups(num, group_by_rank(hand))
 
 
 def get_highest(hand: list[Card]) -> list[list[Card]]:
@@ -307,11 +328,13 @@ def evaluate_poker_hand(
         "High Card": [],
     }
 
-    # Compute component parts
-    _5 = get_x_same(5, hand)
-    _4 = get_x_same(4, hand)
-    _3 = get_x_same(3, hand)
-    _2 = get_x_same(2, hand)
+    # Compute component parts. The rank grouping is shared across all four
+    # sizes — rebuilding it per size was the hottest cost in training.
+    _groups = group_by_rank(hand)
+    _5 = _x_same_from_groups(5, _groups)
+    _4 = _x_same_from_groups(4, _groups)
+    _3 = _x_same_from_groups(3, _groups)
+    _2 = _x_same_from_groups(2, _groups)
     _flush = get_flush(hand, four_fingers=four_fingers, smeared=smeared)
     _straight = get_straight(hand, four_fingers=four_fingers, shortcut=shortcut)
     _highest = get_highest(hand)

@@ -391,7 +391,11 @@ class TestLookaheadFeatures:
         """The feature must summarize the *offered* set. If it described a
         play the action table doesn't contain, it would be exactly the
         incoherence known issue #2 created."""
-        from jackdaw.env.gymnasium_wrapper import _cheap_hand_value, log_scale
+        from jackdaw.env.gymnasium_wrapper import (
+            _LOOKAHEAD_VALUE_SCALE,
+            _cheap_hand_value,
+            log_scale,
+        )
 
         env = self._env(lookahead=True)
         obs = self._into_selecting_hand(env)
@@ -405,7 +409,32 @@ class TestLookaheadFeatures:
         best_offered = max(
             _cheap_hand_value([hand[i] for i in combo], jokers, levels)[0] for combo in offered
         )
-        assert obs["lookahead"][1] == pytest.approx(log_scale(best_offered), rel=1e-5)
+        expected = log_scale(best_offered) / _LOOKAHEAD_VALUE_SCALE
+        assert obs["lookahead"][1] == pytest.approx(expected, rel=1e-5)
+
+    def test_value_scale_knob_is_honored(self) -> None:
+        """`_LOOKAHEAD_VALUE_SCALE` must actually divide index 1.
+
+        Balancing the block's field scales was tried in runs 16/17 and made
+        results *worse* (see `_lookahead_features`), so the default is back
+        to 1.0 — but the knob has to keep working for further study, exactly
+        like `BalatroExtractor.embed_init_std` after run 10.
+        """
+        import jackdaw.env.gymnasium_wrapper as gw
+
+        assert gw._LOOKAHEAD_VALUE_SCALE == 1.0, "default should be off (unscaled)"
+
+        baseline = self._into_selecting_hand(self._env(lookahead=True))["lookahead"][1]
+        assert baseline > 1.0, "index 1 is a log-magnitude; expected it above the ratio range"
+
+        original = gw._LOOKAHEAD_VALUE_SCALE
+        try:
+            gw._LOOKAHEAD_VALUE_SCALE = 10.0
+            scaled = self._into_selecting_hand(self._env(lookahead=True))["lookahead"][1]
+        finally:
+            gw._LOOKAHEAD_VALUE_SCALE = original
+
+        assert scaled == pytest.approx(baseline / 10.0, rel=1e-5)
 
     def test_terminal_observation_does_not_carry_a_stale_menu(self) -> None:
         """A terminal step skips enumeration, so the block must be cleared

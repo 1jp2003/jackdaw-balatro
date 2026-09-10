@@ -38,6 +38,7 @@ import argparse
 import sys
 
 import numpy as np
+import torch
 
 sys.path.insert(0, ".")
 
@@ -113,6 +114,13 @@ def main() -> None:
     parser.add_argument("--episodes", type=int, default=200)
     parser.add_argument("--max-steps", type=int, default=2_000)
     args = parser.parse_args()
+
+    # Same reason as scripts/train_ppo.py::disable_distribution_validation —
+    # a float32 softmax over MAX_ACTIONS=500 occasionally lands outside
+    # Simplex()'s 1e-6 tolerance. This script runs three full 200-episode
+    # sweeps, so it draws ~3x as many samples as a plain eval and hits that
+    # tail accordingly: run 20's ablation died here before this was added.
+    torch.distributions.Distribution.set_default_validate_args(False)
 
     model = MaskablePPO.load(args.checkpoint, device="cpu")
     if "lookahead" not in getattr(model.observation_space, "spaces", {}):
